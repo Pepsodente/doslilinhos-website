@@ -2,5 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "doslilinhos-website",
   "compatibility_date": "2026-10-12",
-  "assets": { "directory": "." }
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application"
+  }
 }
