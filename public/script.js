@@ -1,0 +1,5 @@
+const menu=document.querySelector('.menu'),nav=document.querySelector('nav');menu?.addEventListener('click',()=>{const o=nav.classList.toggle('open');menu.setAttribute('aria-expanded',o)});document.getElementById('year').textContent=new Date().getFullYear();
+const dialog=document.getElementById('account-dialog');document.querySelectorAll('.open-account').forEach(b=>b.addEventListener('click',()=>dialog.showModal()));document.querySelector('.close').addEventListener('click',()=>dialog.close());
+function notice(text){const n=document.createElement('div');n.className='notice';n.textContent=text;document.body.appendChild(n);setTimeout(()=>n.remove(),3500)}
+document.getElementById('account-form').addEventListener('submit',e=>{e.preventDefault();notice('Demonstração: a conta será ativada quando ligarmos a base de dados.');dialog.close()});
+document.getElementById('order').addEventListener('click',()=>{const q=Number(document.getElementById('qty').value),max=12;if(q<1||q>max)return notice('Escolha entre 1 e 12 caixas.');notice(`Demonstração: reserva de ${q} caixa${q>1?'s':''}.`)});
