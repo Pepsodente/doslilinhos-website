@@ -12,6 +12,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Verifica se o Worker está operacional.
     if (request.method === "GET" && url.pathname === "/api/health") {
       return json({
         success: true,
@@ -20,6 +21,7 @@ export default {
       });
     }
 
+    // Consulta o stock atual de ovos.
     if (request.method === "GET" && url.pathname === "/api/stock") {
       try {
         const product = await env.DB
@@ -59,7 +61,9 @@ export default {
           Number(product.available_eggs || 0)
         );
 
-        const unitsPerPack = Number(product.units_per_pack || 6);
+        const unitsPerPack = Number(
+          product.units_per_pack || 6
+        );
 
         return json({
           success: true,
@@ -90,6 +94,7 @@ export default {
       }
     }
 
+    // Devolve erro quando a rota da API não existe.
     if (url.pathname.startsWith("/api/")) {
       return json(
         {
@@ -100,6 +105,7 @@ export default {
       );
     }
 
+    // Mantém o website normal acessível.
     return env.ASSETS.fetch(request);
   }
 };
