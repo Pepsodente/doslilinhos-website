@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "doslilinhos-website",
   "compatibility_date": "2026-10-12",
-  "main": "./src/script.js",
+  "main": "./src/index.js",
 
   "assets": {
     "directory": "./public",
