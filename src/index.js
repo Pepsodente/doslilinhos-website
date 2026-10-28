@@ -7,7 +7,7 @@ const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const email=v=>String(v||"").trim().toLowerCase();
 const getCookie=(r,n)=>{const x=(r.headers.get("cookie")||"").split(";").map(v=>v.trim()).find(v=>v.startsWith(n+"="));return x?decodeURIComponent(x.slice(n.length+1)):""};
 async function sha(v){return hex(await crypto.subtle.digest("SHA-256",E.encode(v)))}
-async function derive(password,salt){const key=await crypto.subtle.importKey("raw",E.encode(password),"PBKDF2",false,["deriveBits"]);return hex(await crypto.subtle.deriveBits({name:"PBKDF2",salt:unb64(salt),iterations:210000,hash:"SHA-256"},key,256))}
+async function derive(password,salt){const key=await crypto.subtle.importKey("raw",E.encode(password),"PBKDF2",false,["deriveBits"]);return hex(await crypto.subtle.deriveBits({name:"PBKDF2",salt:unb64(salt),iterations:100000,hash:"SHA-256"},key,256))}
 async function makePassword(password){const salt=b64(crypto.getRandomValues(new Uint8Array(16)));return `${salt}:${await derive(password,salt)}`}
 async function checkPassword(password,stored){const [salt,hash]=String(stored||"").split(":");return !!salt&&!!hash&&(await derive(password,salt))===hash}
 async function customer(r,env){const token=getCookie(r,"dl_session");if(!token)return null;return env.DB.prepare(`SELECT c.id,c.name,c.email,c.notifications_enabled FROM customer_sessions s JOIN customers c ON c.id=s.customer_id WHERE s.token_hash=? AND s.expires_at>datetime('now') AND c.active=1`).bind(await sha(token)).first()}
