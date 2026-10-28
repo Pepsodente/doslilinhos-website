@@ -1,0 +1,14 @@
+ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'not_required';
+ALTER TABLE orders ADD COLUMN payment_provider TEXT;
+ALTER TABLE orders ADD COLUMN payment_reference TEXT;
+ALTER TABLE orders ADD COLUMN payment_url TEXT;
+ALTER TABLE orders ADD COLUMN payment_expires_at TEXT;
+ALTER TABLE orders ADD COLUMN confirmed_at TEXT;
+ALTER TABLE orders ADD COLUMN paid_at TEXT;
+ALTER TABLE orders ADD COLUMN ready_at TEXT;
+ALTER TABLE orders ADD COLUMN completed_at TEXT;
+ALTER TABLE orders ADD COLUMN terms_version TEXT;
+ALTER TABLE orders ADD COLUMN terms_accepted_at TEXT;
+CREATE TABLE subscriptions(id INTEGER PRIMARY KEY AUTOINCREMENT,customer_id INTEGER NOT NULL,product_id INTEGER NOT NULL,eggs_per_delivery INTEGER NOT NULL,frequency TEXT NOT NULL,shortage_preference TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'requested',terms_version TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE payments(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id INTEGER NOT NULL,provider TEXT NOT NULL,provider_session_id TEXT UNIQUE,status TEXT NOT NULL DEFAULT 'created',amount_cents INTEGER NOT NULL,currency TEXT NOT NULL DEFAULT 'eur',payment_url TEXT,expires_at TEXT,paid_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE payment_events(id INTEGER PRIMARY KEY AUTOINCREMENT,provider_event_id TEXT NOT NULL UNIQUE,event_type TEXT NOT NULL,payload TEXT,processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
