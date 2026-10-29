@@ -1,9 +1,36 @@
 {
-  "$schema":"./node_modules/wrangler/config-schema.json",
-  "name":"doslilinhos-website",
-  "compatibility_date":"2026-10-12",
-  "main":"./src/index.js",
-  "assets":{"directory":"./public","binding":"ASSETS","run_worker_first":["/api/*"]},
-  "d1_databases":[{"binding":"DB","database_name":"doslilinhos-producao","database_id":"e6b847ac-494a-4fc1-bd88-492da74bd4d5"}],
-  "observability":{"logs":{"enabled":true,"invocation_logs":true}}
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "doslilinhos-website",
+  "compatibility_date": "2026-10-12",
+  "main": "./src/index.js",
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "doslilinhos-producao",
+      "database_id": "e6b847ac-494a-4fc1-bd88-492da74bd4d5"
+    }
+  ],
+
+  "vars": {
+    "ADMIN_EMAIL": "encomendas@doslilinhos.pt",
+    "EMAIL_FROM": "Dos Lilinhos <encomendas@doslilinhos.pt>",
+    "EMAIL_REPLY_TO": "encomendas@doslilinhos.pt",
+    "SITE_URL": "https://doslilinhos.pt"
+  },
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
 }
