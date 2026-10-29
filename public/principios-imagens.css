@@ -1,0 +1,43 @@
+/* Imagens dos princípios Dos Lilinhos */
+.principles-grid .principle-visual.transparency,
+.principles-grid .principle-visual.welfare,
+.principles-grid .principle-visual.pasture {
+  height: auto;
+  aspect-ratio: 3 / 2;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  border-radius: 8px;
+  box-shadow: 0 9px 28px rgba(32, 48, 36, 0.14);
+}
+
+.principles-grid .principle-visual.transparency {
+  background-image: url('/principio-transparencia.png');
+}
+
+.principles-grid .principle-visual.welfare {
+  background-image: url('/principio-bem-estar.png');
+}
+
+.principles-grid .principle-visual.pasture {
+  background-image: url('/principio-pastagem.png');
+}
+
+/* As imagens já contêm títulos e grafismo. */
+.principles-grid .principle-visual.transparency::before,
+.principles-grid .principle-visual.welfare::before,
+.principles-grid .principle-visual.pasture::before,
+.principles-grid .principle-visual.transparency > span,
+.principles-grid .principle-visual.welfare > span,
+.principles-grid .principle-visual.pasture > span {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .principles-grid .principle-visual.transparency,
+  .principles-grid .principle-visual.welfare,
+  .principles-grid .principle-visual.pasture {
+    aspect-ratio: 4 / 3;
+    background-position: center;
+  }
+}
