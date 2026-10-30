@@ -17,7 +17,7 @@ function applyHomepageVisualFixes() {
     image.alt = 'Livro de Reclamações';
   }
 
-  // Usa o PNG existente em public/icones/whatsapp.jpg.
+  // Usa o PNG existente em public/icones/whatsapp.png.
   const whatsappLink = [...document.querySelectorAll('a')].find(link => {
     const href = (link.getAttribute('href') || '').toLowerCase();
     const label = `${link.getAttribute('aria-label') || ''} ${link.textContent || ''}`.toLowerCase();
@@ -27,7 +27,7 @@ function applyHomepageVisualFixes() {
   if (whatsappLink) {
     whatsappLink.replaceChildren();
     const icon = document.createElement('img');
-    icon.src = '/icones/whatsapp.jpg';
+    icon.src = '/icones/whatsapp.png';
     icon.alt = 'WhatsApp';
     icon.width = 48;
     icon.height = 48;
