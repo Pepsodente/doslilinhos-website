@@ -17,7 +17,7 @@ function applyHomepageVisualFixes() {
     image.alt = 'Livro de Reclamações';
   }
 
-  // Usa o PNG existente em public/icones/whatsapp.png.
+  // Usa o PNG existente em public/icones/whatsapp.jpeg.
   const whatsappLink = [...document.querySelectorAll('a')].find(link => {
     const href = (link.getAttribute('href') || '').toLowerCase();
     const label = `${link.getAttribute('aria-label') || ''} ${link.textContent || ''}`.toLowerCase();
