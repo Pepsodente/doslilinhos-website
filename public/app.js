@@ -27,7 +27,7 @@ function applyHomepageVisualFixes() {
   if (whatsappLink) {
     whatsappLink.replaceChildren();
     const icon = document.createElement('img');
-    icon.src = '/icones/whatsapp.png';
+    icon.src = '/icones/whatsapp.jpg';
     icon.alt = 'WhatsApp';
     icon.width = 48;
     icon.height = 48;
