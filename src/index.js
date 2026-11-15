@@ -841,7 +841,492 @@ if(p==='/api/admin/workflow'&&m==='GET'){if(!adminOK(r,e))return out({error:'Nã
 let fiscal=p.match(/^\/api\/admin\/orders\/(\d+)\/(invoice|credit-note)$/);if(fiscal&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+fiscal[1],kind=fiscal[2],b=await r.json(),o=await orderDetails(e,id);if(!o)return out({error:'Pedido não encontrado.'},404);const number=String(b.documentNumber||'').trim(),date=String(b.documentDate||'').trim(),total=Number(b.totalCents);if(!number||!date||!Number.isInteger(total)||total<0)return out({error:'Confirma número, data e total do documento.'},400);if(kind==='invoice'&&o.payment_status!=='paid')return out({error:'A fatura só pode ser registada após pagamento confirmado.'},409);if(kind==='invoice'&&o.invoice_status==='issued')return out({error:'A encomenda já tem documento fiscal registado.'},409);if(kind==='credit-note'&&o.invoice_status!=='issued')return out({error:'Não existe fatura registada para associar à nota de crédito.'},409);if(kind==='credit-note'&&!o.incident_status)return out({error:'Regista primeiro o problema ou devolução.'},409);const type=kind==='invoice'?(b.documentType==='invoice'?'invoice':'invoice_receipt'):'credit_note',original=kind==='credit-note'?o.invoice_document_id:null;const q=await e.DB.prepare(`INSERT INTO fiscal_documents(order_id,document_type,document_number,document_date,total_cents,original_document_id,document_url,notes) VALUES(?,?,?,?,?,?,?,?)`).bind(id,type,number,date,total,original,b.documentUrl||null,b.notes||null).run();if(kind==='invoice')await e.DB.prepare(`UPDATE orders SET invoice_status='issued',invoice_document_id=?,approval_status='invoiced',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.meta.last_row_id,id).run();else await e.DB.prepare(`UPDATE orders SET credit_note_status='issued',credit_note_document_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.meta.last_row_id,id).run();const action=kind==='invoice'?'invoice_registered':'credit_note_registered';await audit(e.DB,{entityType:'fiscal_document',entityId:id,reference:o.order_number,action,fromStatus:kind==='invoice'?o.invoice_status:o.credit_note_status,toStatus:'issued',actor:'admin',amountCents:total,reason:b.notes||null,providerReference:number,ipHash:await requestHash(r),details:{documentType:type,documentDate:date,originalDocumentId:original}});await sendEmail(e,e.DB,{type:action,to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),documentTypeLabel:type==='invoice'?'Fatura':type==='invoice_receipt'?'Fatura-recibo':'Nota de crédito',documentNumber:number,documentDate:date,totalCents:total}});return out({success:true,documentId:q.meta.last_row_id,status:'issued'})}
 if(p==='/api/admin/fiscal-documents'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const q=await e.DB.prepare(`SELECT f.*,o.order_number,c.name,c.email FROM fiscal_documents f JOIN orders o ON o.id=f.order_id JOIN customers c ON c.id=o.customer_id ORDER BY f.created_at DESC LIMIT 500`).all();return out({documents:q.results})}
 let incident=p.match(/^\/api\/admin\/orders\/(\d+)\/incident$/);if(incident&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+incident[1],b=await r.json(),o=await orderDetails(e,id);if(!o)return out({error:'Pedido não encontrado.'},404);if(String(b.confirmation||'')!=='ANULAR')return out({error:'Escreve ANULAR para confirmar.'},400);if(o.incident_status)return out({error:'Já existe um incidente registado nesta encomenda.'},409);const reason=String(b.reason||'').trim();if(reason.length<5)return out({error:'Indica o motivo interno.'},400);const paid=o.payment_status==='paid',mode=paid?(b.refundMode||'full'):'none';let refund=null,refundAmount=0;await e.DB.prepare(`UPDATE orders SET incident_status='reported',incident_reason=?,incident_customer_note=?,incident_reported_at=CURRENT_TIMESTAMP,approval_status='issue_reported',status='cancelled',credit_note_status=CASE WHEN invoice_status='issued' THEN 'pending' ELSE credit_note_status END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(reason,b.customerNote||null,id).run();await audit(e.DB,{entityType:'order',entityId:id,reference:o.order_number,action:'issue_reported',fromStatus:o.approval_status||o.status,toStatus:'issue_reported',actor:'admin',reason,ipHash:await requestHash(r),details:{customerNote:b.customerNote||null,refundMode:mode}});if(paid&&mode!=='none'){const payment=await e.DB.prepare(`SELECT * FROM payments WHERE order_id=? AND status='paid' ORDER BY id DESC LIMIT 1`).bind(id).first();if(!payment)throw Error('Pagamento confirmado não encontrado.');let pi=payment.provider_payment_intent;if(!pi&&payment.provider_session_id){const session=await stripeGet(e,`checkout/sessions/${payment.provider_session_id}`);pi=session.payment_intent;await e.DB.prepare(`UPDATE payments SET provider_payment_intent=? WHERE id=?`).bind(pi,payment.id).run()}if(!pi)throw Error('Referência de pagamento Stripe não encontrada.');refundAmount=mode==='partial'?Number(b.amountCents):Number(payment.amount_cents);if(!Number.isInteger(refundAmount)||refundAmount<1||refundAmount>Number(payment.amount_cents))throw Error('Valor de reembolso inválido.');refund=await stripePost(e,'refunds',{'payment_intent':pi,'amount':String(refundAmount),'metadata[order_id]':String(id),'metadata[order_number]':o.order_number,'reason':'requested_by_customer'});await e.DB.prepare(`UPDATE orders SET refund_status='pending',refund_amount_cents=?,refund_reference=?,payment_status='refund_pending',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(refundAmount,refund.id,id).run();await audit(e.DB,{entityType:'refund',entityId:id,reference:o.order_number,action:'refund_requested',fromStatus:'paid',toStatus:'pending',actor:'admin',amountCents:refundAmount,reason,providerReference:refund.id,ipHash:await requestHash(r)})}const stateLabel=paid&&mode!=='none'?'Reembolso em processamento':'Pedido anulado';await sendEmail(e,e.DB,{type:'issue_reported',to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),stateLabel}});await sendEmail(e,e.DB,{type:'issue_reported',to:e.ADMIN_EMAIL,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),name:'Administração',stateLabel:`${stateLabel} · ${reason}`}});return out({success:true,incident:'reported',refundStatus:refund?'pending':'not_required'})}
-let wm=p.match(/^\/api\/admin\/orders\/(\d+)\/(approve|reject|preparing|ready|complete)$/);if(wm&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+wm[1],action=wm[2],b=await r.json(),o=await orderDetails(e,id);if(!o)return out({error:'Pedido não encontrado.'},404);if(action==='preparing'&&o.payment_status!=='paid'&&o.payment_status!=='not_required')return out({error:'O pagamento ainda não foi confirmado.'},409);if(action==='preparing'&&o.payment_status==='paid'&&o.invoice_status!=='issued')return out({error:'Regista primeiro o documento fiscal emitido na ATGo.'},409);if(action==='approve'){const total=Number(b.totalCents||o.total_cents);if(!Number.isInteger(total)||total<50)return out({error:'Indica um valor válido, com mínimo de 0,50 €.'},400);const expiry=Math.floor(Date.now()/1000)+Number(b.paymentHours||24)*3600,session=await stripePost(e,'checkout/sessions',{'mode':'payment','success_url':`${e.SITE_URL}/pagamento-sucesso.html?session_id={CHECKOUT_SESSION_ID}`,'cancel_url':`${e.SITE_URL}/encomendas.html`,'customer_email':o.email,'client_reference_id':String(id),'metadata[order_id]':String(id),'line_items[0][price_data][currency]':'eur','line_items[0][price_data][product_data][name]':`Pedido ${o.order_number}`,'line_items[0][price_data][unit_amount]':String(total),'line_items[0][quantity]':'1','expires_at':String(expiry)});await e.DB.batch([e.DB.prepare(`UPDATE orders SET status='confirmed',approval_status='awaiting_payment',payment_status='pending',payment_provider='stripe',payment_reference=?,payment_url=?,payment_expires_at=datetime(?,'unixepoch'),approval_note=?,pickup_location=?,pickup_at=?,total_cents=?,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(session.id,session.url,expiry,b.note||null,b.location||null,b.pickupAt||null,total,id),e.DB.prepare(`INSERT INTO payments(order_id,provider,provider_session_id,status,amount_cents,currency,payment_url,expires_at) VALUES(?,'stripe',?,'pending',?,'eur',?,datetime(?,'unixepoch'))`).bind(id,session.id,total,session.url,expiry),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_requested',?,'awaiting_payment',?,'admin')`).bind(id,o.status,b.note||null)]);await sendEmail(e,e.DB,{type:'payment_available',to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),items:o.items,totalCents:total,pickupAt:b.pickupAt,location:b.location,paymentUrl:session.url}});return out({success:true,status:'awaiting_payment',paymentUrl:session.url})}const next={reject:'cancelled',preparing:'confirmed',ready:'ready',complete:'completed'}[action],approvalState={reject:'rejected',preparing:'preparing',ready:'ready',complete:'completed'}[action];await e.DB.prepare(`UPDATE orders SET status=?,approval_status=?,approval_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,approvalState,b.note||null,id).run();await e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,?,?,?,?,'admin')`).bind(id,action,o.status,next,b.note||null).run();await audit(e.DB,{entityType:'order',entityId:id,reference:o.order_number,action,fromStatus:o.approval_status||o.status,toStatus:approvalState,actor:'admin',reason:b.note||null,ipHash:await requestHash(r)});await sendEmail(e,e.DB,{type:{reject:'order_rejected',preparing:'order_preparing',ready:'order_ready',complete:'order_completed'}[action],to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),note:b.note}});return out({success:true,status:next})}
+let wm=p.match(/^\/api\/admin\/orders\/(\d+)\/(approve|reject|preparing|ready|complete)$/);if(wm&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+wm[1],action=wm[2],b=await r.json(),o=await orderDetails(e,id);if(!o)return out({error:'Pedido não encontrado.'},404);if(action==='preparing'&&o.payment_status!=='paid'&&o.payment_status!=='not_required')return out({error:'O pagamento ainda não foi confirmado.'},409);if(action==='preparing'&&o.payment_status==='paid'&&o.invoice_status!=='issued')return out({error:'Regista primeiro o documento fiscal emitido na ATGo.'},409);if (action === 'approve') {
+  /*
+   * O desconto é recebido em pontos-base:
+   *
+   * 0    = 0%
+   * 500  = 5%
+   * 1000 = 10%
+   * 1500 = 15%
+   */
+  const discountBps =
+    validateDiscountBps(
+      b.discountBps || 0
+    );
+
+  /*
+   * Se o administrador indicar uma entrega,
+   * a informação é guardada antes de congelar
+   * a fotografia fiscal.
+   *
+   * Todos os valores monetários estão em cêntimos.
+   */
+  const shippingGrossCents = Number(
+    b.shippingGrossCents || 0
+  );
+
+  if (
+    !Number.isInteger(shippingGrossCents) ||
+    shippingGrossCents < 0
+  ) {
+    return out(
+      {
+        error:
+          'O valor da entrega é inválido.'
+      },
+      400
+    );
+  }
+
+  if (shippingGrossCents > 0) {
+    await e.DB.prepare(`
+      UPDATE orders
+      SET
+        shipping_service_code =
+          'DELIVERY-INDEPENDENT',
+
+        shipping_carrier = ?,
+
+        shipping_service_name = ?,
+
+        shipping_gross_cents = ?,
+
+        shipping_vat_rate_bps = 2300,
+
+        updated_at = CURRENT_TIMESTAMP
+
+      WHERE id = ?
+    `)
+      .bind(
+        String(
+          b.shippingCarrier || ''
+        ).trim() || null,
+
+        String(
+          b.shippingServiceName ||
+          'Serviço autónomo de entrega'
+        ).trim(),
+
+        shippingGrossCents,
+
+        id
+      )
+      .run();
+  } else {
+    /*
+     * Se não houver entrega, limpa qualquer
+     * configuração logística eventualmente
+     * guardada numa tentativa anterior.
+     */
+    await e.DB.prepare(`
+      UPDATE orders
+      SET
+        shipping_service_code = NULL,
+        shipping_carrier = NULL,
+        shipping_service_name = NULL,
+        shipping_net_cents = 0,
+        shipping_vat_cents = 0,
+        shipping_gross_cents = 0,
+        shipping_vat_rate_bps = NULL,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `)
+      .bind(id)
+      .run();
+  }
+
+  /*
+   * Congela as linhas da encomenda:
+   *
+   * - produto e designação;
+   * - preço unitário com IVA;
+   * - desconto;
+   * - taxa de IVA;
+   * - base tributável;
+   * - IVA;
+   * - total com IVA;
+   * - entrega autónoma a 23%.
+   */
+  const fiscalSnapshot =
+    await freezeOrderFiscalSnapshot(
+      e,
+      id,
+      {
+        discountBps
+      }
+    );
+
+  const total =
+    fiscalSnapshot.grossTotalCents;
+
+  if (
+    !Number.isInteger(total) ||
+    total < 50
+  ) {
+    return out(
+      {
+        error:
+          'O total fiscal deve ser de pelo menos 0,50 €.'
+      },
+      400
+    );
+  }
+
+  /*
+   * Se o painel administrativo ainda enviar
+   * totalCents, usamos esse valor apenas como
+   * controlo. O valor cobrado será sempre o
+   * total calculado a partir das linhas fiscais.
+   */
+  if (
+    b.totalCents !== undefined &&
+    b.totalCents !== null &&
+    b.totalCents !== ''
+  ) {
+    const submittedTotal =
+      Number(b.totalCents);
+
+    if (
+      !Number.isInteger(submittedTotal) ||
+      submittedTotal < 0
+    ) {
+      return out(
+        {
+          error:
+            'O total indicado pelo administrador é inválido.'
+        },
+        400
+      );
+    }
+
+    if (submittedTotal !== total) {
+      return out(
+        {
+          error:
+            'O total indicado não coincide com o total fiscal calculado.',
+
+          submittedTotalCents:
+            submittedTotal,
+
+          calculatedTotalCents:
+            total,
+
+          calculatedTotal:
+            euros(total),
+
+          netTotalCents:
+            fiscalSnapshot.netTotalCents,
+
+          vatTotalCents:
+            fiscalSnapshot.vatTotalCents,
+
+          vatBreakdown:
+            fiscalSnapshot.vatBreakdown
+        },
+        409
+      );
+    }
+  }
+
+  const paymentHours = Number(
+    b.paymentHours || 24
+  );
+
+  if (
+    !Number.isInteger(paymentHours) ||
+    paymentHours < 1 ||
+    paymentHours > 168
+  ) {
+    return out(
+      {
+        error:
+          'O prazo de pagamento deve estar entre 1 e 168 horas.'
+      },
+      400
+    );
+  }
+
+  const expiry =
+    Math.floor(Date.now() / 1000) +
+    paymentHours * 3600;
+
+  /*
+   * A Stripe recebe o total final já com IVA.
+   * A discriminação fiscal completa permanece
+   * congelada na D1 e será usada no recibo.
+   */
+  const session = await stripePost(
+    e,
+    'checkout/sessions',
+    {
+      mode: 'payment',
+
+      success_url:
+        `${e.SITE_URL}/pagamento-sucesso.html` +
+        '?session_id={CHECKOUT_SESSION_ID}',
+
+      cancel_url:
+        `${e.SITE_URL}/encomendas.html`,
+
+      customer_email:
+        o.email,
+
+      client_reference_id:
+        String(id),
+
+      'metadata[order_id]':
+        String(id),
+
+      'metadata[order_number]':
+        String(o.order_number),
+
+      'metadata[net_total_cents]':
+        String(
+          fiscalSnapshot.netTotalCents
+        ),
+
+      'metadata[vat_total_cents]':
+        String(
+          fiscalSnapshot.vatTotalCents
+        ),
+
+      'metadata[gross_total_cents]':
+        String(total),
+
+      'metadata[discount_bps]':
+        String(discountBps),
+
+      'metadata[shipping_gross_cents]':
+        String(shippingGrossCents),
+
+      'line_items[0][price_data][currency]':
+        'eur',
+
+      'line_items[0][price_data][product_data][name]':
+        `Pedido ${o.order_number}`,
+
+      'line_items[0][price_data][product_data][description]':
+        'Encomenda Dos Lilinhos, IVA incluído',
+
+      'line_items[0][price_data][unit_amount]':
+        String(total),
+
+      'line_items[0][quantity]':
+        '1',
+
+      expires_at:
+        String(expiry)
+    }
+  );
+
+  await e.DB.batch([
+    e.DB.prepare(`
+      UPDATE orders
+      SET
+        status = 'confirmed',
+        approval_status = 'awaiting_payment',
+        payment_status = 'pending',
+        payment_provider = 'stripe',
+        payment_reference = ?,
+        payment_url = ?,
+        payment_expires_at =
+          datetime(?, 'unixepoch'),
+        approval_note = ?,
+        pickup_location = ?,
+        pickup_at = ?,
+        total_cents = ?,
+        receipt_status = 'pending',
+        confirmed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(
+      session.id,
+      session.url,
+      expiry,
+      b.note || null,
+      b.location || null,
+      b.pickupAt || null,
+      total,
+      id
+    ),
+
+    e.DB.prepare(`
+      INSERT INTO payments (
+        order_id,
+        provider,
+        provider_session_id,
+        status,
+        amount_cents,
+        currency,
+        payment_url,
+        expires_at
+      )
+      VALUES (
+        ?,
+        'stripe',
+        ?,
+        'pending',
+        ?,
+        'eur',
+        ?,
+        datetime(?, 'unixepoch')
+      )
+    `).bind(
+      id,
+      session.id,
+      total,
+      session.url,
+      expiry
+    ),
+
+    e.DB.prepare(`
+      INSERT INTO workflow_events (
+        entity_type,
+        entity_id,
+        event_type,
+        from_status,
+        to_status,
+        note,
+        actor
+      )
+      VALUES (
+        'order',
+        ?,
+        'payment_requested',
+        ?,
+        'awaiting_payment',
+        ?,
+        'admin'
+      )
+    `).bind(
+      id,
+      o.status,
+      b.note || null
+    )
+  ]);
+
+  await audit(
+    e.DB,
+    {
+      entityType: 'order',
+      entityId: id,
+      reference: o.order_number,
+      action: 'payment_requested',
+      fromStatus:
+        o.approval_status ||
+        o.status,
+      toStatus:
+        'awaiting_payment',
+      actor: 'admin',
+      amountCents: total,
+      ipHash:
+        await requestHash(r),
+      details: {
+        discountBps,
+
+        shippingGrossCents,
+
+        netTotalCents:
+          fiscalSnapshot.netTotalCents,
+
+        vatTotalCents:
+          fiscalSnapshot.vatTotalCents,
+
+        grossTotalCents:
+          fiscalSnapshot.grossTotalCents,
+
+        vatBreakdown:
+          fiscalSnapshot.vatBreakdown,
+
+        stripeSessionId:
+          session.id,
+
+        paymentExpiresAt:
+          expiry
+      }
+    }
+  );
+
+  await sendEmail(
+    e,
+    e.DB,
+    {
+      type: 'payment_available',
+      to: o.email,
+      customerId: o.customer_id,
+      orderId: id,
+
+      data: {
+        ...o,
+        ...flowUrls(e, id),
+
+        items:
+          fiscalSnapshot.lines.map(
+            line => ({
+              name: line.productName,
+
+              quantity:
+                line.type === 'shipping'
+                  ? '1 serviço'
+                  : `${line.quantity} unidade(s)`
+            })
+          ),
+
+        totalCents: total,
+
+        netTotalCents:
+          fiscalSnapshot.netTotalCents,
+
+        vatTotalCents:
+          fiscalSnapshot.vatTotalCents,
+
+        vatBreakdown:
+          fiscalSnapshot.vatBreakdown,
+
+        pickupAt:
+          b.pickupAt,
+
+        location:
+          b.location,
+
+        paymentUrl:
+          session.url
+      }
+    }
+  );
+
+  return out({
+    success: true,
+
+    status:
+      'awaiting_payment',
+
+    paymentUrl:
+      session.url,
+
+    paymentExpiresAt:
+      expiry,
+
+    fiscalSummary: {
+      discountBps,
+
+      netTotalCents:
+        fiscalSnapshot.netTotalCents,
+
+      vatTotalCents:
+        fiscalSnapshot.vatTotalCents,
+
+      grossTotalCents:
+        fiscalSnapshot.grossTotalCents,
+
+      vatBreakdown:
+        fiscalSnapshot.vatBreakdown,
+
+      shippingGrossCents
+    }
+  });
+const next={reject:'cancelled',preparing:'confirmed',ready:'ready',complete:'completed'}[action],approvalState={reject:'rejected',preparing:'preparing',ready:'ready',complete:'completed'}[action];await e.DB.prepare(`UPDATE orders SET status=?,approval_status=?,approval_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,approvalState,b.note||null,id).run();await e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,?,?,?,?,'admin')`).bind(id,action,o.status,next,b.note||null).run();await audit(e.DB,{entityType:'order',entityId:id,reference:o.order_number,action,fromStatus:o.approval_status||o.status,toStatus:approvalState,actor:'admin',reason:b.note||null,ipHash:await requestHash(r)});await sendEmail(e,e.DB,{type:{reject:'order_rejected',preparing:'order_preparing',ready:'order_ready',complete:'order_completed'}[action],to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),note:b.note}});return out({success:true,status:next})}
 wm=p.match(/^\/api\/admin\/subscriptions\/(\d+)\/(approve|reject)$/);if(wm&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+wm[1],action=wm[2],b=await r.json(),x=await e.DB.prepare(`SELECT s.*,c.name,c.email,p.name product FROM subscriptions s JOIN customers c ON c.id=s.customer_id JOIN products p ON p.id=s.product_id WHERE s.id=?`).bind(id).first();if(!x)return out({error:'Subscrição não encontrada.'},404);const next=action==='approve'?'active':'rejected';await e.DB.prepare(`UPDATE subscriptions SET status=?,approval_note=?,price_cents=COALESCE(?,price_cents),first_delivery_on=COALESCE(?,first_delivery_on),pickup_location=COALESCE(?,pickup_location),approved_at=CASE WHEN ?='active' THEN CURRENT_TIMESTAMP ELSE approved_at END,rejected_at=CASE WHEN ?='rejected' THEN CURRENT_TIMESTAMP ELSE rejected_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,b.note||null,b.priceCents||null,b.firstDelivery||null,b.location||null,next,next,id).run();await sendEmail(e,e.DB,{type:action==='approve'?'subscription_approved':'subscription_rejected',to:x.email,customerId:x.customer_id,subscriptionId:id,data:{...x,note:b.note,quantity:`${x.eggs_per_delivery} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[x.frequency]||x.frequency,priceCents:b.priceCents||0,firstDelivery:b.firstDelivery,url:`${e.SITE_URL}/subscricoes.html`,productsUrl:`${e.SITE_URL}/produtos.html`}});return out({success:true,status:next})}
 if(p==='/api/stock'){const pr=await product(e);return out({success:true,stock:await stock(e,pr.id),product:pr})}if(p==='/api/auth/me'){const c=await customer(r,e);return out({success:true,authenticated:!!c,customer:c})}if(p==='/api/auth/register'&&m==='POST'){const b=await r.json(),name=String(b.name||'').trim(),username=String(b.username||'').trim().toLowerCase(),email=String(b.email||'').trim().toLowerCase(),pw=String(b.password||'');if(!/^[a-z0-9._-]{3,30}$/.test(username)||pw.length<8||pw!==b.passwordConfirmation||!b.privacyAccepted)return out({success:false,error:'Confirma todos os dados e as palavras-passe.'},400);if(await e.DB.prepare('SELECT id FROM customers WHERE email=? OR username=?').bind(email,username).first())return out({success:false,error:'Email ou nome de utilizador já existente.'},409);const q=await e.DB.prepare(`INSERT INTO customers(name,username,email,password_hash,notifications_enabled,privacy_accepted_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(name,username,email,await hashPass(pw),b.notificationsEnabled?1:0).run();return out({success:true},201,{'set-cookie':setcookie(await makeSession(q.meta.last_row_id,e))})}if(p==='/api/auth/recover'&&m==='POST'){const b=await r.json(),identifier=String(b.identifier||'').trim().toLowerCase(),generic={success:true,message:'Se encontrarmos uma conta correspondente, enviaremos um email com as instruções.'};if(!identifier)return out(generic);const ih=await sha(`recover:${identifier}`),recent=await e.DB.prepare(`SELECT COUNT(*) n FROM password_reset_rate_limits WHERE identifier_hash=? AND requested_at>datetime('now','-15 minutes')`).bind(ih).first();if(Number(recent?.n||0)>=3)return out(generic);await e.DB.prepare('INSERT INTO password_reset_rate_limits(identifier_hash) VALUES(?)').bind(ih).run();const c=await e.DB.prepare(`SELECT id,name,username,email FROM customers WHERE active=1 AND (lower(email)=? OR lower(username)=?)`).bind(identifier,identifier).first();if(c){await e.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE customer_id=? AND used_at IS NULL`).bind(c.id).run();const raw=b64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g,''),th=await sha(raw),ip=r.headers.get('cf-connecting-ip')||'',iph=ip?await sha(`reset-ip:${ip}`):null;await e.DB.prepare(`INSERT INTO password_reset_tokens(customer_id,token_hash,expires_at,requested_ip_hash) VALUES(?,?,datetime('now','+30 minutes'),?)`).bind(c.id,th,iph).run();await sendEmail(e,e.DB,{type:'access_recovery',to:c.email,customerId:c.id,data:{name:c.name,username:c.username,resetUrl:`${e.SITE_URL}/repor-password.html?token=${encodeURIComponent(raw)}`}})}return out(generic)}
 if(p==='/api/auth/reset/validate'&&m==='GET'){const raw=u.searchParams.get('token')||'';if(!raw)return out({valid:false});const x=await e.DB.prepare(`SELECT id FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>datetime('now')`).bind(await sha(raw)).first();return out({valid:!!x})}
