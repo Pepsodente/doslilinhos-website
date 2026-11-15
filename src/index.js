@@ -1,6 +1,272 @@
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb
+} from 'pdf-lib';
 const RESEND_API='https://api.resend.com/emails';
 const e=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const euros=c=>new Intl.NumberFormat('pt-PT',{style:'currency',currency:'EUR'}).format((Number(c)||0)/100);
+/* =========================================================
+   CÁLCULOS FISCAIS E UTILITÁRIOS DOS RECIBOS
+   ========================================================= */
+
+function assertIntegerCents(value, fieldName = 'Valor') {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(`${fieldName} inválido.`);
+  }
+
+  return number;
+}
+
+function assertVatRate(rateBps) {
+  const rate = Number(rateBps);
+
+  if (
+    !Number.isInteger(rate) ||
+    ![0, 600, 1300, 2300].includes(rate)
+  ) {
+    throw new Error('Taxa de IVA inválida.');
+  }
+
+  return rate;
+}
+
+function applyPercentageDiscount(
+  grossCents,
+  discountBps = 0
+) {
+  const gross = assertIntegerCents(
+    grossCents,
+    'Preço com IVA'
+  );
+
+  const discount = Number(discountBps || 0);
+
+  if (
+    !Number.isInteger(discount) ||
+    discount < 0 ||
+    discount > 10000
+  ) {
+    throw new Error('Desconto percentual inválido.');
+  }
+
+  return Math.round(
+    gross * (10000 - discount) / 10000
+  );
+}
+
+function splitVatFromGross(
+  grossCents,
+  vatRateBps
+) {
+  const gross = assertIntegerCents(
+    grossCents,
+    'Total com IVA'
+  );
+
+  const rate = assertVatRate(vatRateBps);
+
+  if (rate === 0) {
+    return {
+      netCents: gross,
+      vatCents: 0,
+      grossCents: gross,
+      vatRateBps: 0
+    };
+  }
+
+  const net = Math.round(
+    gross * 10000 / (10000 + rate)
+  );
+
+  return {
+    netCents: net,
+    vatCents: gross - net,
+    grossCents: gross,
+    vatRateBps: rate
+  };
+}
+
+function calculateFiscalLine({
+  unitGrossCents,
+  quantity = 1,
+  discountBps = 0,
+  vatRateBps
+}) {
+  const unitGross = assertIntegerCents(
+    unitGrossCents,
+    'Preço unitário'
+  );
+
+  const qty = Number(quantity);
+
+  if (
+    !Number.isInteger(qty) ||
+    qty < 1
+  ) {
+    throw new Error('Quantidade inválida.');
+  }
+
+  const grossBeforeDiscount =
+    unitGross * qty;
+
+  const grossAfterDiscount =
+    applyPercentageDiscount(
+      grossBeforeDiscount,
+      discountBps
+    );
+
+  const discountGrossCents =
+    grossBeforeDiscount - grossAfterDiscount;
+
+  const tax = splitVatFromGross(
+    grossAfterDiscount,
+    vatRateBps
+  );
+
+  return {
+    quantity: qty,
+    unitGrossCents: unitGross,
+    discountBps: Number(discountBps || 0),
+    grossBeforeDiscountCents:
+      grossBeforeDiscount,
+    discountGrossCents,
+    lineNetCents: tax.netCents,
+    lineVatCents: tax.vatCents,
+    lineGrossCents: tax.grossCents,
+    vatRateBps: tax.vatRateBps
+  };
+}
+
+function buildVatBreakdown(lines = []) {
+  const grouped = new Map();
+
+  for (const line of lines) {
+    const rate = assertVatRate(
+      line.vatRateBps
+    );
+
+    const current = grouped.get(rate) || {
+      vatRateBps: rate,
+      netCents: 0,
+      vatCents: 0,
+      grossCents: 0
+    };
+
+    current.netCents +=
+      assertIntegerCents(
+        line.lineNetCents,
+        'Base tributável'
+      );
+
+    current.vatCents +=
+      assertIntegerCents(
+        line.lineVatCents,
+        'IVA'
+      );
+
+    current.grossCents +=
+      assertIntegerCents(
+        line.lineGrossCents,
+        'Total'
+      );
+
+    grouped.set(rate, current);
+  }
+
+  return [...grouped.values()]
+    .sort(
+      (a, b) =>
+        a.vatRateBps - b.vatRateBps
+    );
+}
+
+function calculateFiscalTotals(lines = []) {
+  const breakdown = buildVatBreakdown(lines);
+
+  return {
+    netTotalCents: breakdown.reduce(
+      (total, item) =>
+        total + item.netCents,
+      0
+    ),
+
+    vatTotalCents: breakdown.reduce(
+      (total, item) =>
+        total + item.vatCents,
+      0
+    ),
+
+    grossTotalCents: breakdown.reduce(
+      (total, item) =>
+        total + item.grossCents,
+      0
+    ),
+
+    vatBreakdown: breakdown
+  };
+}
+
+function vatRateLabel(rateBps) {
+  const rate = Number(rateBps || 0);
+
+  return `${new Intl.NumberFormat(
+    'pt-PT',
+    {
+      maximumFractionDigits: 2
+    }
+  ).format(rate / 100)}%`;
+}
+
+function formatReceiptNumber(
+  year,
+  sequence
+) {
+  return [
+    'DL-RC',
+    String(year),
+    String(sequence).padStart(6, '0')
+  ].join('-');
+}
+
+function safePdfText(value) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function abbreviatedPaymentReference(value) {
+  const reference = String(value || '').trim();
+
+  if (reference.length <= 14) {
+    return reference;
+  }
+
+  return `${reference.slice(0, 6)}…${reference.slice(-4)}`;
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+
+  const chunkSize = 8192;
+
+  for (
+    let offset = 0;
+    offset < bytes.length;
+    offset += chunkSize
+  ) {
+    const chunk = bytes.subarray(
+      offset,
+      offset + chunkSize
+    );
+
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
 const dt=v=>v?new Intl.DateTimeFormat('pt-PT',{dateStyle:'long',timeStyle:'short'}).format(new Date(v)):'a definir';
 const first=n=>String(n||'').trim().split(/\s+/)[0]||'Olá';
 const icon=n=>/ovo/i.test(n)?'🥚':/frango/i.test(n)?'🌿':/cabaz|regional|alheira|chouri/i.test(n)?'🧺':'📦';
