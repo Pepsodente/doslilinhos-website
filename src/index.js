@@ -4,7 +4,7 @@ import {
   rgb
 } from 'pdf-lib';
 const RESEND_API='https://api.resend.com/emails';
-const e=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const e=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'','>':'>','"':'&quot;',"'":'&#39;'}[c]));
 const euros=c=>new Intl.NumberFormat('pt-PT',{style:'currency',currency:'EUR'}).format((Number(c)||0)/100);
 /* =========================================================
    CÁLCULOS FISCAIS E UTILITÁRIOS DOS RECIBOS
