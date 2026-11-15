@@ -1136,9 +1136,29 @@ async function generateReceiptPdf({
 
   try {
     const logoUrl = new URL(
-      '/logo-dos-lilinhos.jpeg',
+      '/logo-dos-lilinhos.png',
       env.SITE_URL
     );
+
+    const logoResponse = await env.ASSETS.fetch(
+      new Request(logoUrl)
+    );
+
+    if (logoResponse.ok) {
+      const logoBytes =
+        await logoResponse.arrayBuffer();
+
+      logoImage =
+        await pdfDocument.embedPng(
+          logoBytes
+        );
+    }
+  } catch (error) {
+    console.error(
+      'Não foi possível carregar o símbolo no recibo:',
+      error
+    );
+  }
 
     const logoResponse = await env.ASSETS.fetch(
       new Request(logoUrl)
@@ -1202,8 +1222,8 @@ async function generateReceiptPdf({
   if (logoImage) {
     const logoDimensions =
       logoImage.scaleToFit(
-        145,
-        68
+        205,
+        92
       );
 
     page.drawImage(
@@ -1213,7 +1233,7 @@ async function generateReceiptPdf({
         y:
           y -
           logoDimensions.height +
-          15,
+          24,
         width:
           logoDimensions.width,
         height:
@@ -1247,37 +1267,30 @@ async function generateReceiptPdf({
       color: green
     }
   );
-y -= 20;
+
+  y -= 72;
 
   drawPdfText(
     page,
     'Produção familiar, sazonal e transparente',
     {
       x: margin,
-      y: y - 4,
-      size: 8,
-      font: regular,
-      color: muted
+      y,
+      size: 10.5,
+      font: bold,
+      color: green
     }
   );
 
   page.drawRectangle({
     x: margin,
-    y: y - 18,
+    y: y - 17,
     width: pageWidth - margin * 2,
     height: 4,
     color: green
   });
 
-  y -= 48;
-
-  page.drawRectangle({
-    x: margin,
-    y: y - 42,
-    width: pageWidth - margin * 2,
-    height: 48,
-    color: soft
-  });
+  y -= 50;
 
   page.drawRectangle({
     x: margin,
