@@ -3816,4 +3816,192 @@ if (
 if(p==='/api/stock'){const pr=await product(e);return out({success:true,stock:await stock(e,pr.id),product:pr})}if(p==='/api/auth/me'){const c=await customer(r,e);return out({success:true,authenticated:!!c,customer:c})}if(p==='/api/auth/register'&&m==='POST'){const b=await r.json(),name=String(b.name||'').trim(),username=String(b.username||'').trim().toLowerCase(),email=String(b.email||'').trim().toLowerCase(),pw=String(b.password||'');if(!/^[a-z0-9._-]{3,30}$/.test(username)||pw.length<8||pw!==b.passwordConfirmation||!b.privacyAccepted)return out({success:false,error:'Confirma todos os dados e as palavras-passe.'},400);if(await e.DB.prepare('SELECT id FROM customers WHERE email=? OR username=?').bind(email,username).first())return out({success:false,error:'Email ou nome de utilizador já existente.'},409);const q=await e.DB.prepare(`INSERT INTO customers(name,username,email,password_hash,notifications_enabled,privacy_accepted_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(name,username,email,await hashPass(pw),b.notificationsEnabled?1:0).run();return out({success:true},201,{'set-cookie':setcookie(await makeSession(q.meta.last_row_id,e))})}if(p==='/api/auth/recover'&&m==='POST'){const b=await r.json(),identifier=String(b.identifier||'').trim().toLowerCase(),generic={success:true,message:'Se encontrarmos uma conta correspondente, enviaremos um email com as instruções.'};if(!identifier)return out(generic);const ih=await sha(`recover:${identifier}`),recent=await e.DB.prepare(`SELECT COUNT(*) n FROM password_reset_rate_limits WHERE identifier_hash=? AND requested_at>datetime('now','-15 minutes')`).bind(ih).first();if(Number(recent?.n||0)>=3)return out(generic);await e.DB.prepare('INSERT INTO password_reset_rate_limits(identifier_hash) VALUES(?)').bind(ih).run();const c=await e.DB.prepare(`SELECT id,name,username,email FROM customers WHERE active=1 AND (lower(email)=? OR lower(username)=?)`).bind(identifier,identifier).first();if(c){await e.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE customer_id=? AND used_at IS NULL`).bind(c.id).run();const raw=b64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g,''),th=await sha(raw),ip=r.headers.get('cf-connecting-ip')||'',iph=ip?await sha(`reset-ip:${ip}`):null;await e.DB.prepare(`INSERT INTO password_reset_tokens(customer_id,token_hash,expires_at,requested_ip_hash) VALUES(?,?,datetime('now','+30 minutes'),?)`).bind(c.id,th,iph).run();await sendEmail(e,e.DB,{type:'access_recovery',to:c.email,customerId:c.id,data:{name:c.name,username:c.username,resetUrl:`${e.SITE_URL}/repor-password.html?token=${encodeURIComponent(raw)}`}})}return out(generic)}
 if(p==='/api/auth/reset/validate'&&m==='GET'){const raw=u.searchParams.get('token')||'';if(!raw)return out({valid:false});const x=await e.DB.prepare(`SELECT id FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>datetime('now')`).bind(await sha(raw)).first();return out({valid:!!x})}
 if(p==='/api/auth/reset'&&m==='POST'){const b=await r.json(),raw=String(b.token||''),pw=String(b.password||''),confirm=String(b.passwordConfirmation||'');if(pw.length<8||pw!==confirm)return out({error:'As palavras-passe devem coincidir e ter pelo menos 8 caracteres.'},400);const x=await e.DB.prepare(`SELECT t.id,t.customer_id,c.name,c.email FROM password_reset_tokens t JOIN customers c ON c.id=t.customer_id WHERE t.token_hash=? AND t.used_at IS NULL AND t.expires_at>datetime('now')`).bind(await sha(raw)).first();if(!x)return out({error:'A ligação é inválida ou expirou.'},400);await e.DB.batch([e.DB.prepare('UPDATE customers SET password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(await hashPass(pw),x.customer_id),e.DB.prepare('UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?').bind(x.id),e.DB.prepare('DELETE FROM customer_sessions WHERE customer_id=?').bind(x.customer_id)]);await sendEmail(e,e.DB,{type:'password_changed',to:x.email,customerId:x.customer_id,data:{name:x.name,loginUrl:`${e.SITE_URL}/?login=1`}});return out({success:true})}
-if(p==='/api/auth/login'&&m==='POST'){const b=await r.json(),identifier=String(b.identifier||b.email||'').trim().toLowerCase(),c=await e.DB.prepare('SELECT * FROM customers WHERE active=1 AND (lower(email)=? OR lower(username)=?)').bind(identifier,identifier).first();if(!c||!await verifyPass(b.password,c.password_hash))return out({success:false,error:'Email ou palavra-passe incorretos.'},401);return out({success:true},200,{'set-cookie':setcookie(await makeSession(c.id,e))})}if(p==='/api/auth/logout'&&m==='POST'){const t=cookie(r,'dl_session');if(t)await e.DB.prepare('DELETE FROM customer_sessions WHERE token_hash=?').bind(await sha(t)).run();return out({success:true},200,{'set-cookie':'dl_session=; Path=/; Max-Age=0'})}if(p==='/api/my/profile'&&m==='PATCH'){const c=await customer(r,e),b=await r.json(),un=String(b.username||'').trim().toLowerCase();if(!c)return out({error:'Inicia sessão.'},401);if(!/^[a-z0-9._-]{3,30}$/.test(un))return out({error:'Nome de utilizador inválido.'},400);if(await e.DB.prepare('SELECT id FROM customers WHERE username=? AND id<>?').bind(un,c.id).first())return out({error:'Nome de utilizador ocupado.'},409);await e.DB.prepare('UPDATE customers SET name=?,username=?,notifications_enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(b.name,un,b.notificationsEnabled?1:0,c.id).run();return out({success:true})}if(p==='/api/my/password'&&m==='PATCH'){const c=await customer(r,e),b=await r.json();if(!c)return out({error:'Inicia sessão.'},401);if(b.newPassword.length<8||b.newPassword!==b.newPasswordConfirmation)return out({error:'As novas palavras-passe não coincidem.'},400);const x=await e.DB.prepare('SELECT password_hash FROM customers WHERE id=?').bind(c.id).first();if(!await verifyPass(b.currentPassword,x.password_hash))return out({error:'Palavra-passe atual incorreta.'},401);await e.DB.prepare('UPDATE customers SET password_hash=? WHERE id=?').bind(await hashPass(b.newPassword),c.id).run();return out({success:true})}if(p==='/api/my/account'&&m==='DELETE'){const c=await customer(r,e),b=await r.json();if(!c)return out({error:'Inicia sessão.'},401);if(b.confirmation!=='ELIMINAR')return out({error:'Escreve ELIMINAR para confirmar.'},400);const anon=`conta-eliminada-${c.id}-${Date.now()}@anon.invalid`;await e.DB.batch([e.DB.prepare(`UPDATE reservations SET customer_name='Conta eliminada',customer_email=? WHERE reservation_number IN(SELECT order_number FROM orders WHERE customer_id=?)`).bind(anon,c.id),e.DB.prepare(`UPDATE subscriptions SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE customer_id=? AND status IN('requested','active','paused')`).bind(c.id),e.DB.prepare('DELETE FROM customer_sessions WHERE customer_id=?').bind(c.id),e.DB.prepare(`UPDATE customers SET name='Conta eliminada',username=NULL,email=?,password_hash=?,notifications_enabled=0,active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(anon,await hashPass(crypto.randomUUID()),c.id)]);return out({success:true},200,{'set-cookie':'dl_session=; Path=/; Max-Age=0'})}if(p==='/api/reservations'&&m==='POST'){const c=await customer(r,e),b=await r.json(),pr=await product(e),packs=+b.packs;if(!c)return out({error:'Inicia sessão.'},401);const eggs=packs*pr.units_per_pack,no=`DL-${Date.now().toString(36).toUpperCase()}`,q=await e.DB.prepare(`INSERT INTO orders(customer_id,order_number,status,total_cents,reserved_until,customer_notes,terms_version,terms_accepted_at,payment_status) VALUES(?,?,'pending',?,datetime('now','+24 hours'),?,'2026-10-28',CURRENT_TIMESTAMP,'not_required')`).bind(c.id,no,(pr.price_cents||0)*packs,b.notes||'').run();await e.DB.prepare(`INSERT INTO order_items(order_id,product_id,packs,units_per_pack,quantity_eggs,unit_price_cents) VALUES(?,?,?,?,?,?)`).bind(q.meta.last_row_id,pr.id,packs,pr.units_per_pack,eggs,pr.price_cents).run();const z=await e.DB.prepare(`INSERT INTO reservations(reservation_number,product_id,customer_name,customer_email,packs,quantity_eggs,status,reserved_until) VALUES(?,?,?,?,?,?,'pending',datetime('now','+24 hours'))`).bind(no,pr.id,c.name,c.email,packs,eggs).run();await e.DB.prepare(`INSERT INTO inventory_movements(product_id,movement_type,quantity_eggs,reference_type,reference_id,notes) VALUES(?,'reservation',?,'reservation',?,'Pedido online')`).bind(pr.id,-eggs,z.meta.last_row_id).run();const mailData={name:c.name,email:c.email,number:no,items:[{name:pr.name,quantity:`${eggs} unidades`}],note:b.notes||'',url:`${e.SITE_URL}/encomendas.html`,adminUrl:`${e.SITE_URL}/admin.html`};await Promise.allSettled([sendEmail(e,e.DB,{type:'order_received',to:c.email,data:mailData,customerId:c.id,orderId:q.meta.last_row_id}),sendEmail(e,e.DB,{type:'order_admin',to:e.ADMIN_EMAIL,data:mailData,customerId:c.id,orderId:q.meta.last_row_id})]);return out({success:true},201)}if(p==='/api/my/orders'){const c=await customer(r,e);if(!c)return out({error:'Inicia sessão.'},401);const q=await e.DB.prepare(`SELECT o.*,COALESCE(SUM(i.quantity_eggs),0) quantity_eggs FROM orders o LEFT JOIN order_items i ON i.order_id=o.id WHERE o.customer_id=? GROUP BY o.id ORDER BY o.created_at DESC`).bind(c.id).all();return out({success:true,orders:q.results})}if(p==='/api/subscriptions'&&m==='POST'){const c=await customer(r,e),b=await r.json(),pr=await product(e);if(!c)return out({error:'Inicia sessão.'},401);const sub=await e.DB.prepare(`INSERT INTO subscriptions(customer_id,product_id,eggs_per_delivery,frequency,shortage_preference,status,terms_version) VALUES(?,?,?,?,?,'requested','2026-10-28')`).bind(c.id,pr.id,b.eggs,b.frequency,b.shortagePreference).run();await sendEmail(e,e.DB,{type:'subscription_received',to:c.email,customerId:c.id,subscriptionId:sub.meta.last_row_id,data:{name:c.name,product:pr.name,quantity:`${b.eggs} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[b.frequency]||b.frequency,shortage:{wait:'Aguardar produção',lower:'Aceitar quantidade inferior',skip:'Saltar entrega'}[b.shortagePreference]||b.shortagePreference,url:`${e.SITE_URL}/subscricoes.html`}});return out({success:true},201)}if(p==='/api/my/subscriptions'){const c=await customer(r,e);if(!c)return out({error:'Inicia sessão.'},401);const q=await e.DB.prepare('SELECT * FROM subscriptions WHERE customer_id=? ORDER BY created_at DESC').bind(c.id).all();return out({success:true,subscriptions:q.results})}return null}export default{async fetch(r,e){try{return await route(r,e)||e.ASSETS.fetch(r)}catch(x){console.error(x);return out({success:false,error:x.message||'Erro interno.'},500)}}}
+if(p==='/api/auth/login'&&m==='POST'){const b=await r.json(),identifier=String(b.identifier||b.email||'').trim().toLowerCase(),c=await e.DB.prepare('SELECT * FROM customers WHERE active=1 AND (lower(email)=? OR lower(username)=?)').bind(identifier,identifier).first();if(!c||!await verifyPass(b.password,c.password_hash))return out({success:false,error:'Email ou palavra-passe incorretos.'},401);return out({success:true},200,{'set-cookie':setcookie(await makeSession(c.id,e))})}if(p==='/api/auth/logout'&&m==='POST'){const t=cookie(r,'dl_session');if(t)await e.DB.prepare('DELETE FROM customer_sessions WHERE token_hash=?').bind(await sha(t)).run();return out({success:true},200,{'set-cookie':'dl_session=; Path=/; Max-Age=0'})}if(p==='/api/my/profile'&&m==='PATCH'){const c=await customer(r,e),b=await r.json(),un=String(b.username||'').trim().toLowerCase();if(!c)return out({error:'Inicia sessão.'},401);if(!/^[a-z0-9._-]{3,30}$/.test(un))return out({error:'Nome de utilizador inválido.'},400);if(await e.DB.prepare('SELECT id FROM customers WHERE username=? AND id<>?').bind(un,c.id).first())return out({error:'Nome de utilizador ocupado.'},409);await e.DB.prepare('UPDATE customers SET name=?,username=?,notifications_enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(b.name,un,b.notificationsEnabled?1:0,c.id).run();return out({success:true})}if(p==='/api/my/password'&&m==='PATCH'){const c=await customer(r,e),b=await r.json();if(!c)return out({error:'Inicia sessão.'},401);if(b.newPassword.length<8||b.newPassword!==b.newPasswordConfirmation)return out({error:'As novas palavras-passe não coincidem.'},400);const x=await e.DB.prepare('SELECT password_hash FROM customers WHERE id=?').bind(c.id).first();if(!await verifyPass(b.currentPassword,x.password_hash))return out({error:'Palavra-passe atual incorreta.'},401);await e.DB.prepare('UPDATE customers SET password_hash=? WHERE id=?').bind(await hashPass(b.newPassword),c.id).run();return out({success:true})}if(p==='/api/my/account'&&m==='DELETE'){const c=await customer(r,e),b=await r.json();if(!c)return out({error:'Inicia sessão.'},401);if(b.confirmation!=='ELIMINAR')return out({error:'Escreve ELIMINAR para confirmar.'},400);const anon=`conta-eliminada-${c.id}-${Date.now()}@anon.invalid`;await e.DB.batch([e.DB.prepare(`UPDATE reservations SET customer_name='Conta eliminada',customer_email=? WHERE reservation_number IN(SELECT order_number FROM orders WHERE customer_id=?)`).bind(anon,c.id),e.DB.prepare(`UPDATE subscriptions SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE customer_id=? AND status IN('requested','active','paused')`).bind(c.id),e.DB.prepare('DELETE FROM customer_sessions WHERE customer_id=?').bind(c.id),e.DB.prepare(`UPDATE customers SET name='Conta eliminada',username=NULL,email=?,password_hash=?,notifications_enabled=0,active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(anon,await hashPass(crypto.randomUUID()),c.id)]);return out({success:true},200,{'set-cookie':'dl_session=; Path=/; Max-Age=0'})}if(p==='/api/reservations'&&m==='POST'){const c=await customer(r,e),b=await r.json(),pr=await product(e),packs=+b.packs;if(!c)return out({error:'Inicia sessão.'},401);const eggs=packs*pr.units_per_pack,no=`DL-${Date.now().toString(36).toUpperCase()}`,q=await e.DB.prepare(`INSERT INTO orders(customer_id,order_number,status,total_cents,reserved_until,customer_notes,terms_version,terms_accepted_at,payment_status) VALUES(?,?,'pending',?,datetime('now','+24 hours'),?,'2026-10-28',CURRENT_TIMESTAMP,'not_required')`).bind(c.id,no,(pr.price_cents||0)*packs,b.notes||'').run();await e.DB.prepare(`INSERT INTO order_items(order_id,product_id,packs,units_per_pack,quantity_eggs,unit_price_cents) VALUES(?,?,?,?,?,?)`).bind(q.meta.last_row_id,pr.id,packs,pr.units_per_pack,eggs,pr.price_cents).run();const z=await e.DB.prepare(`INSERT INTO reservations(reservation_number,product_id,customer_name,customer_email,packs,quantity_eggs,status,reserved_until) VALUES(?,?,?,?,?,?,'pending',datetime('now','+24 hours'))`).bind(no,pr.id,c.name,c.email,packs,eggs).run();await e.DB.prepare(`INSERT INTO inventory_movements(product_id,movement_type,quantity_eggs,reference_type,reference_id,notes) VALUES(?,'reservation',?,'reservation',?,'Pedido online')`).bind(pr.id,-eggs,z.meta.last_row_id).run();const mailData={name:c.name,email:c.email,number:no,items:[{name:pr.name,quantity:`${eggs} unidades`}],note:b.notes||'',url:`${e.SITE_URL}/encomendas.html`,adminUrl:`${e.SITE_URL}/admin.html`};await Promise.allSettled([sendEmail(e,e.DB,{type:'order_received',to:c.email,data:mailData,customerId:c.id,orderId:q.meta.last_row_id}),sendEmail(e,e.DB,{type:'order_admin',to:e.ADMIN_EMAIL,data:mailData,customerId:c.id,orderId:q.meta.last_row_id})]);return out({success:true},201)}if (
+  p === '/api/my/orders' &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const result = await e.DB.prepare(`
+    SELECT
+      o.*,
+
+      COALESCE(
+        (
+          SELECT SUM(i.quantity_eggs)
+          FROM order_items i
+          WHERE i.order_id = o.id
+        ),
+        0
+      ) AS quantity_eggs,
+
+      r.receipt_number,
+      r.created_at AS receipt_created_at,
+
+      invoice.document_number
+        AS invoice_document_number,
+
+      invoice.document_date
+        AS invoice_document_date,
+
+      invoice.document_url
+        AS invoice_document_url,
+
+      invoice.document_type
+        AS invoice_document_type,
+
+      credit.document_number
+        AS credit_note_document_number,
+
+      credit.document_date
+        AS credit_note_document_date,
+
+      credit.document_url
+        AS credit_note_document_url
+
+    FROM orders o
+
+    LEFT JOIN payment_receipts r
+      ON r.id = o.receipt_id
+      AND r.order_id = o.id
+
+    LEFT JOIN fiscal_documents invoice
+      ON invoice.id =
+        o.invoice_document_id
+
+    LEFT JOIN fiscal_documents credit
+      ON credit.id =
+        o.credit_note_document_id
+
+    WHERE o.customer_id = ?
+
+    ORDER BY o.created_at DESC
+  `)
+    .bind(currentCustomer.id)
+    .all();
+
+  const orders = (
+    result.results || []
+  ).map(order => {
+    const receiptAvailable =
+      Boolean(
+        order.receipt_id &&
+        order.receipt_number &&
+        (
+          order.payment_status === 'paid' ||
+          order.payment_status === 'refunded'
+        )
+      );
+
+    const invoiceAvailable =
+      Boolean(
+        order.invoice_status === 'issued' &&
+        order.invoice_document_id &&
+        order.invoice_document_url
+      );
+
+    const creditNoteAvailable =
+      Boolean(
+        order.credit_note_status === 'issued' &&
+        order.credit_note_document_id &&
+        order.credit_note_document_url
+      );
+
+    return {
+      ...order,
+
+      documents: {
+        receipt: {
+          status:
+            receiptAvailable
+              ? 'available'
+              : (
+                  order.payment_status === 'paid'
+                    ? 'processing'
+                    : 'not_available'
+                ),
+
+          number:
+            order.receipt_number ||
+            null,
+
+          issuedAt:
+            order.receipt_created_at ||
+            null,
+
+          url:
+            receiptAvailable
+              ? `/api/my/orders/${order.id}/receipt.pdf`
+              : null
+        },
+
+        invoice: {
+          status:
+            invoiceAvailable
+              ? 'available'
+              : (
+                  order.payment_status === 'paid'
+                    ? 'pending'
+                    : 'not_available'
+                ),
+
+          number:
+            order.invoice_document_number ||
+            null,
+
+          date:
+            order.invoice_document_date ||
+            null,
+
+          type:
+            order.invoice_document_type ||
+            null,
+
+          url:
+            invoiceAvailable
+              ? order.invoice_document_url
+              : null
+        },
+
+        creditNote: {
+          status:
+            creditNoteAvailable
+              ? 'available'
+              : (
+                  order.credit_note_status === 'pending'
+                    ? 'pending'
+                    : 'not_available'
+                ),
+
+          number:
+            order.credit_note_document_number ||
+            null,
+
+          date:
+            order.credit_note_document_date ||
+            null,
+
+          url:
+            creditNoteAvailable
+              ? order.credit_note_document_url
+              : null
+        }
+      }
+    };
+  });
+
+  return out({
+    success: true,
+    orders
+  });
+}if(p==='/api/subscriptions'&&m==='POST'){const c=await customer(r,e),b=await r.json(),pr=await product(e);if(!c)return out({error:'Inicia sessão.'},401);const sub=await e.DB.prepare(`INSERT INTO subscriptions(customer_id,product_id,eggs_per_delivery,frequency,shortage_preference,status,terms_version) VALUES(?,?,?,?,?,'requested','2026-10-28')`).bind(c.id,pr.id,b.eggs,b.frequency,b.shortagePreference).run();await sendEmail(e,e.DB,{type:'subscription_received',to:c.email,customerId:c.id,subscriptionId:sub.meta.last_row_id,data:{name:c.name,product:pr.name,quantity:`${b.eggs} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[b.frequency]||b.frequency,shortage:{wait:'Aguardar produção',lower:'Aceitar quantidade inferior',skip:'Saltar entrega'}[b.shortagePreference]||b.shortagePreference,url:`${e.SITE_URL}/subscricoes.html`}});return out({success:true},201)}if(p==='/api/my/subscriptions'){const c=await customer(r,e);if(!c)return out({error:'Inicia sessão.'},401);const q=await e.DB.prepare('SELECT * FROM subscriptions WHERE customer_id=? ORDER BY created_at DESC').bind(c.id).all();return out({success:true,subscriptions:q.results})}return null}export default{async fetch(r,e){try{return await route(r,e)||e.ASSETS.fetch(r)}catch(x){console.error(x);return out({success:false,error:x.message||'Erro interno.'},500)}}}
