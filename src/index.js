@@ -303,6 +303,201 @@ async function audit(db,{entityType,entityId,reference=null,action,fromStatus=nu
 async function requestHash(r){const ip=r.headers.get('cf-connecting-ip')||'';return ip?await sha(`audit:${ip}`):null}
 const adminOK=(r,e)=>!!e.ADMIN_TOKEN&&r.headers.get('authorization')===`Bearer ${e.ADMIN_TOKEN}`;
 async function orderDetails(e,id){const o=await e.DB.prepare(`SELECT o.*,c.name,c.email FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=?`).bind(id).first();if(!o)return null;const q=await e.DB.prepare(`SELECT p.name,i.quantity_eggs quantity FROM order_items i JOIN products p ON p.id=i.product_id WHERE i.order_id=?`).bind(id).all();o.items=q.results.map(x=>({name:x.name,quantity:`${x.quantity} unidades`}));return o;}
+/* =========================================================
+   CATÁLOGO FISCAL E LINHAS DA ENCOMENDA
+   ========================================================= */
+
+function eggProductCode(unitsPerPack) {
+  const units = Number(unitsPerPack);
+
+  const codes = {
+    6: 'EGG-06',
+    12: 'EGG-12',
+    18: 'EGG-18',
+    30: 'EGG-30'
+  };
+
+  const code = codes[units];
+
+  if (!code) {
+    throw new Error(
+      `Não existe configuração fiscal para caixa de ${units} ovos.`
+    );
+  }
+
+  return code;
+}
+
+async function getTaxProfile(
+  env,
+  productCode,
+  date = new Date()
+) {
+  const dateText = date
+    .toISOString()
+    .slice(0, 10);
+
+  const profile = await env.DB.prepare(`
+    SELECT
+      id,
+      product_code,
+      product_name,
+      tax_country,
+      tax_region,
+      vat_rate_bps,
+      vat_category,
+      prices_include_vat,
+      tax_treatment,
+      tax_status,
+      accounting_notes,
+      valid_from,
+      valid_until
+    FROM product_tax_profiles
+    WHERE product_code = ?
+      AND tax_region = 'CONTINENT'
+      AND tax_status = 'confirmed'
+      AND valid_from <= ?
+      AND (
+        valid_until IS NULL
+        OR valid_until >= ?
+      )
+    ORDER BY valid_from DESC
+    LIMIT 1
+  `)
+    .bind(
+      productCode,
+      dateText,
+      dateText
+    )
+    .first();
+
+  if (!profile) {
+    throw new Error(
+      `Configuração fiscal em falta para ${productCode}.`
+    );
+  }
+
+  if (
+    profile.tax_treatment === 'direct' &&
+    profile.vat_rate_bps === null
+  ) {
+    throw new Error(
+      `A taxa de IVA de ${productCode} não está definida.`
+    );
+  }
+
+  return profile;
+}
+
+async function getOrderFiscalItems(
+  env,
+  orderId
+) {
+  const result = await env.DB.prepare(`
+    SELECT
+      i.id,
+      i.order_id,
+      i.product_id,
+      i.packs,
+      i.units_per_pack,
+      i.quantity_eggs,
+      i.unit_price_cents,
+
+      i.product_code,
+      i.product_name_snapshot,
+      i.vat_rate_bps,
+      i.vat_category_snapshot,
+      i.unit_gross_cents,
+      i.discount_bps,
+      i.line_net_cents,
+      i.line_vat_cents,
+      i.line_gross_cents,
+
+      p.name AS current_product_name
+
+    FROM order_items i
+
+    JOIN products p
+      ON p.id = i.product_id
+
+    WHERE i.order_id = ?
+
+    ORDER BY i.id
+  `)
+    .bind(orderId)
+    .all();
+
+  return result.results || [];
+}
+
+async function getOrderShipping(
+  env,
+  orderId
+) {
+  const order = await env.DB.prepare(`
+    SELECT
+      id,
+      shipping_service_code,
+      shipping_carrier,
+      shipping_service_name,
+      shipping_net_cents,
+      shipping_vat_cents,
+      shipping_gross_cents,
+      shipping_vat_rate_bps
+    FROM orders
+    WHERE id = ?
+  `)
+    .bind(orderId)
+    .first();
+
+  if (!order) {
+    throw new Error(
+      'Encomenda não encontrada.'
+    );
+  }
+
+  return order;
+}
+
+function validateDiscountBps(value) {
+  const discount = Number(value || 0);
+
+  if (
+    !Number.isInteger(discount) ||
+    discount < 0 ||
+    discount > 10000
+  ) {
+    throw new Error(
+      'O desconto percentual é inválido.'
+    );
+  }
+
+  return discount;
+}
+
+function resolveLineDiscountBps(
+  itemDiscountBps,
+  orderDiscountBps
+) {
+  const orderDiscount =
+    validateDiscountBps(orderDiscountBps);
+
+  const itemDiscount =
+    validateDiscountBps(itemDiscountBps);
+
+  /*
+   * Se a linha já tiver um desconto específico,
+   * prevalece sobre o desconto geral.
+   *
+   * Como a base de dados atribui zero por omissão,
+   * um valor superior a zero é tratado como
+   * desconto específico da linha.
+   */
+
+  return itemDiscount > 0
+    ? itemDiscount
+    : orderDiscount;
+}
 const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
