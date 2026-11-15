@@ -1,4 +1,464 @@
-const $=(s,p=document)=>p.querySelector(s),$$=(s,p=document)=>[...p.querySelectorAll(s)];let me=null,mode='login',stock={};const freq={weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'},substat={requested:'A aguardar aprovação',active:'Ativa',paused:'Pausada',cancelled:'Cancelada',rejected:'Recusada'},status={pending:'Pedido recebido',confirmed:'Confirmada',completed:'Concluída',cancelled:'Cancelada',expired:'Expirada'};function notice(t){const e=document.createElement('div');e.className='notice';e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),5000)}async function api(p,o={}){const r=await fetch(p,{...o,headers:{Accept:'application/json',...(o.body?{'Content-Type':'application/json'}:{}),...(o.headers||{})}}),d=await r.json();if(!r.ok||d.success===false)throw new Error(d.error||`Erro ${r.status}`);return d}$('#year')&&($('#year').textContent=new Date().getFullYear());$('#menuButton')?.addEventListener('click',()=>document.body.classList.toggle('menu-open'));$('#avatarButton')?.addEventListener('click',e=>{e.stopPropagation();const x=$('#avatarMenu').classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',x)});$('#avatarMenu')?.addEventListener('click',e=>e.stopPropagation());document.addEventListener('click',()=>$('#avatarMenu')?.classList.remove('open'));async function session(){const d=await api('/api/auth/me');me=d.customer;document.body.classList.toggle('authenticated',d.authenticated);if(me){$('#menuName').textContent=me.username||me.name;$('#menuEmail').textContent=me.email;$('#welcomeTitle')&&($('#welcomeTitle').textContent=`Olá, ${me.username||me.name}`)}else if(document.body.classList.contains('requires-auth'))location.href='/?login=1'}session().catch(console.error);function auth(m){mode=m;const reg=m==='register';$('#authTitle').textContent=reg?'Criar conta':'Entrar';$$('.register-field').forEach(x=>{x.hidden=!reg;x.style.display=reg?'':'none'});const identifier=$('#authIdentifier'),email=$('#authEmail');if(identifier){identifier.hidden=reg;identifier.disabled=reg;identifier.required=!reg}if(email){email.closest('label').hidden=!reg;email.disabled=!reg;email.required=reg}const recover=$('#recoverAccessLink');if(recover){recover.hidden=reg;recover.style.display=reg?'none':'block'}$('#authSubmit').textContent=reg?'Criar conta':'Entrar';$('#authSwitch').textContent=reg?'Já tem conta? Entrar':'Ainda não tem conta? Criar conta';$('#authMessage').textContent='';$('#authDialog').showModal()}$$('[data-auth]').forEach(b=>b.onclick=()=>auth(b.dataset.auth));$('#authSwitch')?.addEventListener('click',()=>auth(mode==='login'?'register':'login'));$$('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#authForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),body={password:d.get('password')};if(mode==='login')body.identifier=String(d.get('identifier')||'').trim();if(mode==='register'){body.email=String(d.get('email')||'').trim();const u=String(d.get('username')||'').trim(),c=String(d.get('passwordConfirmation')||'');if(!/^[A-Za-z0-9._-]{3,30}$/.test(u))return $('#authMessage').textContent='Nome de utilizador inválido ou com espaços.';if(body.password!==c)return $('#authMessage').textContent='As palavras-passe não coincidem.';Object.assign(body,{name:d.get('name'),username:u,passwordConfirmation:c,notificationsEnabled:!!d.get('notificationsEnabled'),privacyAccepted:!!d.get('privacyAccepted')})}try{await api(`/api/auth/${mode}`,{method:'POST',body:JSON.stringify(body)});f.reset();location.href='/area-cliente.html'}catch(x){$('#authMessage').textContent=x.message}});$('#logoutButton')?.addEventListener('click',async()=>{await api('/api/auth/logout',{method:'POST'});location.href='/'});async function loadStock(){if(!$('#stockPanel'))return;const d=await api('/api/stock');stock=d.stock;$('#stockPanel').textContent=`${stock.availableEggs} ovos disponíveis`;$('#eggFormats').innerHTML=[6,12,18,30].filter(x=>x<=stock.availableEggs).map((x,i)=>`<button class="format ${i?'':'active'}" data-eggs="${x}">${x} ovos</button>`).join('');$$('.format').forEach(b=>b.onclick=()=>{$$('.format').forEach(x=>x.classList.toggle('active',x===b))})}loadStock().catch(console.error);$('#reserveButton')?.addEventListener('click',()=>{if(!me)return auth('login');const e=$('.format.active')?.dataset.eggs;if(!e)return;$('#orderSummary').textContent=`Pedido de ${e} ovos`;$('#orderDialog').dataset.eggs=e;$('#orderDialog').showModal()});$('#orderForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),eggs=Number($('#orderDialog').dataset.eggs);await api('/api/reservations',{method:'POST',body:JSON.stringify({packs:eggs/6,notes:d.get('notes'),termsAccepted:!!d.get('termsAccepted')})});location.href='/encomendas.html'});$('#subscribeButton')?.addEventListener('click',()=>me?$('#subscriptionDialog').showModal():auth('login'));$('#subscriptionForm')?.addEventListener('submit',async e=>{e.preventDefault();const d=new FormData(e.currentTarget);await api('/api/subscriptions',{method:'POST',body:JSON.stringify({eggs:+d.get('eggs'),frequency:d.get('frequency'),shortagePreference:d.get('shortage'),termsAccepted:!!d.get('termsAccepted')})});location.href='/subscricoes.html'});async function loadOrders(){if(!$('#ordersList'))return;const d=await api('/api/my/orders');$('#ordersList').innerHTML=d.orders.length?d.orders.map(o=>`<article class="order-row"><div><strong>${o.order_number}</strong><p>${o.quantity_eggs} ovos</p><span class="status">${o.payment_status==='pending'?'A aguardar pagamento':o.payment_status==='paid'?'Pagamento recebido':status[o.status]||o.status}</span></div><div>${(o.total_cents/100).toFixed(2)} €${o.payment_url&&o.payment_status==='pending'?`<br><a class="button solid" href="${o.payment_url}">Pagar</a>`:''}</div></article>`).join(''):'<p>Ainda não existem encomendas.</p>'}loadOrders().catch(console.error);async function loadSubs(){if(!$('#subscriptionsList'))return;const d=await api('/api/my/subscriptions');$('#subscriptionsList').innerHTML=d.subscriptions.length?d.subscriptions.map(s=>`<article><strong>${s.eggs_per_delivery} ovos · ${freq[s.frequency]}</strong><p><span class="status">${substat[s.status]}</span></p></article>`).join(''):'<p>Ainda não existem subscrições.</p>'}loadSubs().catch(console.error);async function profile(){if(!$('#profileForm'))return;await session();const f=$('#profileForm');f.name.value=me.name;f.username.value=me.username||'';f.email.value=me.email;f.notificationsEnabled.checked=!!me.notifications_enabled;f.onsubmit=async e=>{e.preventDefault();const d=new FormData(f);await api('/api/my/profile',{method:'PATCH',body:JSON.stringify({name:d.get('name'),username:d.get('username'),notificationsEnabled:!!d.get('notificationsEnabled')})});notice('Perfil atualizado.')}}profile().catch(console.error);$('#passwordForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f);if(d.get('newPassword')!==d.get('newPasswordConfirmation'))return notice('As palavras-passe não coincidem.');await api('/api/my/password',{method:'PATCH',body:JSON.stringify(Object.fromEntries(d))});f.reset();notice('Palavra-passe alterada.')});const dd=$('#deleteAccountDialog'),di=$('#deleteConfirmation'),db=$('#confirmDeleteAccount'),dm=$('#deleteAccountMessage');$('#openDeleteAccount')?.addEventListener('click',()=>{di.value='';db.disabled=true;dd.showModal();di.focus()});di?.addEventListener('input',()=>db.disabled=di.value!=='ELIMINAR');db?.addEventListener('click',async()=>{if(di.value!=='ELIMINAR')return;db.disabled=true;db.textContent='A eliminar...';try{await api('/api/my/account',{method:'DELETE',body:JSON.stringify({confirmation:di.value})});location.href='/?conta=eliminada'}catch(x){dm.textContent=x.message;db.disabled=false}});if(new URLSearchParams(location.search).has('login'))auth('login');
+const $=(s,p=document)=>p.querySelector(s),$$=(s,p=document)=>[...p.querySelectorAll(s)];let me=null,mode='login',stock={};const freq={weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'},substat={requested:'A aguardar aprovação',active:'Ativa',paused:'Pausada',cancelled:'Cancelada',rejected:'Recusada'},status={pending:'Pedido recebido',confirmed:'Confirmada',completed:'Concluída',cancelled:'Cancelada',expired:'Expirada'};function notice(t){const e=document.createElement('div');e.className='notice';e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),5000)}async function api(p,o={}){const r=await fetch(p,{...o,headers:{Accept:'application/json',...(o.body?{'Content-Type':'application/json'}:{}),...(o.headers||{})}}),d=await r.json();if(!r.ok||d.success===false)throw new Error(d.error||`Erro ${r.status}`);return d}$('#year')&&($('#year').textContent=new Date().getFullYear());$('#menuButton')?.addEventListener('click',()=>document.body.classList.toggle('menu-open'));$('#avatarButton')?.addEventListener('click',e=>{e.stopPropagation();const x=$('#avatarMenu').classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',x)});$('#avatarMenu')?.addEventListener('click',e=>e.stopPropagation());document.addEventListener('click',()=>$('#avatarMenu')?.classList.remove('open'));async function session(){const d=await api('/api/auth/me');me=d.customer;document.body.classList.toggle('authenticated',d.authenticated);if(me){$('#menuName').textContent=me.username||me.name;$('#menuEmail').textContent=me.email;$('#welcomeTitle')&&($('#welcomeTitle').textContent=`Olá, ${me.username||me.name}`)}else if(document.body.classList.contains('requires-auth'))location.href='/?login=1'}session().catch(console.error);function auth(m){mode=m;const reg=m==='register';$('#authTitle').textContent=reg?'Criar conta':'Entrar';$$('.register-field').forEach(x=>{x.hidden=!reg;x.style.display=reg?'':'none'});const identifier=$('#authIdentifier'),email=$('#authEmail');if(identifier){identifier.hidden=reg;identifier.disabled=reg;identifier.required=!reg}if(email){email.closest('label').hidden=!reg;email.disabled=!reg;email.required=reg}const recover=$('#recoverAccessLink');if(recover){recover.hidden=reg;recover.style.display=reg?'none':'block'}$('#authSubmit').textContent=reg?'Criar conta':'Entrar';$('#authSwitch').textContent=reg?'Já tem conta? Entrar':'Ainda não tem conta? Criar conta';$('#authMessage').textContent='';$('#authDialog').showModal()}$$('[data-auth]').forEach(b=>b.onclick=()=>auth(b.dataset.auth));$('#authSwitch')?.addEventListener('click',()=>auth(mode==='login'?'register':'login'));$$('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#authForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),body={password:d.get('password')};if(mode==='login')body.identifier=String(d.get('identifier')||'').trim();if(mode==='register'){body.email=String(d.get('email')||'').trim();const u=String(d.get('username')||'').trim(),c=String(d.get('passwordConfirmation')||'');if(!/^[A-Za-z0-9._-]{3,30}$/.test(u))return $('#authMessage').textContent='Nome de utilizador inválido ou com espaços.';if(body.password!==c)return $('#authMessage').textContent='As palavras-passe não coincidem.';Object.assign(body,{name:d.get('name'),username:u,passwordConfirmation:c,notificationsEnabled:!!d.get('notificationsEnabled'),privacyAccepted:!!d.get('privacyAccepted')})}try{await api(`/api/auth/${mode}`,{method:'POST',body:JSON.stringify(body)});f.reset();location.href='/area-cliente.html'}catch(x){$('#authMessage').textContent=x.message}});$('#logoutButton')?.addEventListener('click',async()=>{await api('/api/auth/logout',{method:'POST'});location.href='/'});async function loadStock(){if(!$('#stockPanel'))return;const d=await api('/api/stock');stock=d.stock;$('#stockPanel').textContent=`${stock.availableEggs} ovos disponíveis`;$('#eggFormats').innerHTML=[6,12,18,30].filter(x=>x<=stock.availableEggs).map((x,i)=>`<button class="format ${i?'':'active'}" data-eggs="${x}">${x} ovos</button>`).join('');$$('.format').forEach(b=>b.onclick=()=>{$$('.format').forEach(x=>x.classList.toggle('active',x===b))})}loadStock().catch(console.error);$('#reserveButton')?.addEventListener('click',()=>{if(!me)return auth('login');const e=$('.format.active')?.dataset.eggs;if(!e)return;$('#orderSummary').textContent=`Pedido de ${e} ovos`;$('#orderDialog').dataset.eggs=e;$('#orderDialog').showModal()});$('#orderForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),eggs=Number($('#orderDialog').dataset.eggs);await api('/api/reservations',{method:'POST',body:JSON.stringify({packs:eggs/6,notes:d.get('notes'),termsAccepted:!!d.get('termsAccepted')})});location.href='/encomendas.html'});$('#subscribeButton')?.addEventListener('click',()=>me?$('#subscriptionDialog').showModal():auth('login'));$('#subscriptionForm')?.addEventListener('submit',async e=>{e.preventDefault();const d=new FormData(e.currentTarget);await api('/api/subscriptions',{method:'POST',body:JSON.stringify({eggs:+d.get('eggs'),frequency:d.get('frequency'),shortagePreference:d.get('shortage'),termsAccepted:!!d.get('termsAccepted')})});location.href='/subscricoes.html'});
+function escapeHtml(value) {
+  const replacements = {
+    '\u0026': '\u0026amp;',
+    '\u003C': '\u0026lt;',
+    '\u003E': '\u0026gt;',
+    '\u0022': '\u0026quot;',
+    '\u0027': '\u0026#39;'
+  };
+
+  return String(value ?? '').replace(
+    /[\u0026\u003C\u003E\u0022\u0027]/g,
+    character => replacements[character]
+  );
+}
+
+function formatOrderMoney(cents) {
+  return new Intl.NumberFormat(
+    'pt-PT',
+    {
+      style: 'currency',
+      currency: 'EUR'
+    }
+  ).format(
+    Number(cents || 0) / 100
+  );
+}
+
+function formatOrderDate(value) {
+  if (!value) {
+    return '';
+  }
+
+  const normalized =
+    String(value).includes('T')
+      ? String(value)
+      : `${String(value).replace(' ', 'T')}Z`;
+
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) {
+    return escapeHtml(value);
+  }
+
+  return new Intl.DateTimeFormat(
+    'pt-PT',
+    {
+      dateStyle: 'short'
+    }
+  ).format(date);
+}
+
+function orderStatusLabel(order) {
+  if (order.payment_status === 'pending') {
+    return 'A aguardar pagamento';
+  }
+
+  if (order.payment_status === 'paid') {
+    return 'Pagamento recebido';
+  }
+
+  if (order.payment_status === 'refunded') {
+    return 'Pagamento reembolsado';
+  }
+
+  if (order.payment_status === 'refund_pending') {
+    return 'Reembolso em processamento';
+  }
+
+  if (order.payment_status === 'refund_failed') {
+    return 'Reembolso por verificar';
+  }
+
+  const labels = {
+    pending: 'Pedido recebido',
+    confirmed: 'Confirmada',
+    ready: 'Pronta',
+    completed: 'Concluída',
+    cancelled: 'Cancelada',
+    expired: 'Expirada'
+  };
+
+  return (
+    labels[order.status] ||
+    escapeHtml(order.status) ||
+    'Em processamento'
+  );
+}
+
+function orderDocumentCard({
+  type,
+  label,
+  status: documentStatus,
+  number,
+  date,
+  url
+}) {
+  const iconLabels = {
+    receipt: 'RC',
+    invoice: 'FT',
+    credit: 'NC'
+  };
+
+  const iconLabel =
+    iconLabels[type] || 'PDF';
+
+  if (
+    documentStatus === 'available' &&
+    url
+  ) {
+    return `
+      <article class="order-document">
+        <span
+          class="document-icon ${type}"
+          aria-hidden="true"
+        >
+          ${iconLabel}
+        </span>
+
+        <div class="document-information">
+          <strong>
+            ${escapeHtml(label)}
+          </strong>
+
+          <small>
+            ${
+              escapeHtml(
+                number ||
+                'Documento disponível'
+              )
+            }
+            ${
+              date
+                ? ` · ${formatOrderDate(date)}`
+                : ''
+            }
+          </small>
+        </div>
+
+        <a
+          class="document-download"
+          href="${escapeHtml(url)}"
+          target="_blank"
+          rel="noopener"
+        >
+          Descarregar PDF
+        </a>
+      </article>
+    `;
+  }
+
+  if (
+    documentStatus === 'processing' ||
+    documentStatus === 'pending'
+  ) {
+    const statusText =
+      documentStatus === 'processing'
+        ? 'A processar'
+        : 'A aguardar emissão';
+
+    return `
+      <article class="order-document pending">
+        <span
+          class="document-icon ${type}"
+          aria-hidden="true"
+        >
+          ${iconLabel}
+        </span>
+
+        <div class="document-information">
+          <strong>
+            ${escapeHtml(label)}
+          </strong>
+
+          <small>
+            ${statusText}
+          </small>
+        </div>
+
+        <span class="document-status">
+          ${statusText}
+        </span>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="order-document unavailable">
+      <span
+        class="document-icon ${type}"
+        aria-hidden="true"
+      >
+        ${iconLabel}
+      </span>
+
+      <div class="document-information">
+        <strong>
+          ${escapeHtml(label)}
+        </strong>
+
+        <small>
+          Não disponível
+        </small>
+      </div>
+    </article>
+  `;
+}
+
+async function loadOrders() {
+  const ordersList = $('#ordersList');
+
+  if (!ordersList) {
+    return;
+  }
+
+  try {
+    const data = await api(
+      '/api/my/orders'
+    );
+
+    const orders =
+      Array.isArray(data.orders)
+        ? data.orders
+        : [];
+
+    if (!orders.length) {
+      ordersList.innerHTML = `
+        <div class="empty-state">
+          <h2>
+            Ainda não existem encomendas
+          </h2>
+
+          <p>
+            Quando fizeres uma reserva,
+            poderás acompanhar aqui o pedido,
+            o pagamento e os documentos.
+          </p>
+
+          <a
+            class="button solid"
+            href="/produtos.html"
+          >
+            Ver produtos
+          </a>
+        </div>
+      `;
+
+      return;
+    }
+
+    ordersList.innerHTML =
+      orders.map(order => {
+        const documents =
+          order.documents || {};
+
+        const receipt =
+          documents.receipt || {
+            status: 'not_available'
+          };
+
+        const invoice =
+          documents.invoice || {
+            status: 'not_available'
+          };
+
+        const creditNote =
+          documents.creditNote || {
+            status: 'not_available'
+          };
+
+        const showCreditNote =
+          creditNote.status === 'available' ||
+          creditNote.status === 'pending';
+
+        const technicalOrder =
+          String(
+            order.internal_notes || ''
+          ).startsWith('TESTE TÉCNICO');
+
+        return `
+          <article
+            class="order-card"
+            id="pedido-${Number(order.id)}"
+          >
+            <header class="order-card-head">
+              <div>
+                <p class="order-reference">
+                  Encomenda
+                </p>
+
+                <h2>
+                  ${escapeHtml(order.order_number)}
+                </h2>
+
+                <span
+                  class="
+                    order-status
+                    payment-${
+                      escapeHtml(
+                        order.payment_status ||
+                        'unknown'
+                      )
+                    }
+                  "
+                >
+                  ${orderStatusLabel(order)}
+                </span>
+              </div>
+
+              <div class="order-total">
+                <small>Total</small>
+
+                <strong>
+                  ${formatOrderMoney(
+                    order.total_cents
+                  )}
+                </strong>
+              </div>
+            </header>
+
+            <div class="order-summary">
+              <div>
+                <span>Quantidade</span>
+
+                <strong>
+                  ${Number(
+                    order.quantity_eggs || 0
+                  )}
+                  ovos
+                </strong>
+              </div>
+
+              <div>
+                <span>Data do pedido</span>
+
+                <strong>
+                  ${formatOrderDate(
+                    order.created_at
+                  )}
+                </strong>
+              </div>
+
+              ${
+                order.paid_at
+                  ? `
+                    <div>
+                      <span>
+                        Data do pagamento
+                      </span>
+
+                      <strong>
+                        ${formatOrderDate(
+                          order.paid_at
+                        )}
+                      </strong>
+                    </div>
+                  `
+                  : ''
+              }
+            </div>
+
+            ${
+              order.payment_url &&
+              order.payment_status === 'pending'
+                ? `
+                  <div class="order-payment-action">
+                    <a
+                      class="button solid"
+                      href="${
+                        escapeHtml(
+                          order.payment_url
+                        )
+                      }"
+                    >
+                      Concluir pagamento
+                    </a>
+                  </div>
+                `
+                : ''
+            }
+
+            <section class="order-documents">
+              <h3>Documentos</h3>
+
+              ${orderDocumentCard({
+                type: 'receipt',
+                label:
+                  'Recibo / comprovativo de pagamento',
+                status:
+                  receipt.status,
+                number:
+                  receipt.number,
+                date:
+                  receipt.issuedAt,
+                url:
+                  receipt.url
+              })}
+
+              ${orderDocumentCard({
+                type: 'invoice',
+                label: 'Fatura',
+                status:
+                  invoice.status,
+                number:
+                  invoice.number,
+                date:
+                  invoice.date,
+                url:
+                  invoice.url
+              })}
+
+              ${
+                showCreditNote
+                  ? orderDocumentCard({
+                      type: 'credit',
+                      label:
+                        'Nota de crédito',
+                      status:
+                        creditNote.status,
+                      number:
+                        creditNote.number,
+                      date:
+                        creditNote.date,
+                      url:
+                        creditNote.url
+                    })
+                  : ''
+              }
+            </section>
+
+            ${
+              technicalOrder
+                ? `
+                  <div class="technical-order-warning">
+                    Encomenda técnica:
+                    não preparar, expedir ou cobrar.
+                  </div>
+                `
+                : ''
+            }
+          </article>
+        `;
+      }).join('');
+  } catch (error) {
+    console.error(error);
+
+    ordersList.innerHTML = `
+      <div class="form-message error">
+        ${
+          escapeHtml(
+            error.message ||
+            'Não foi possível carregar as encomendas.'
+          )
+        }
+      </div>
+    `;
+  }
+}
+
+loadOrders().catch(console.error);
+async function loadSubs(){if(!$('#subscriptionsList'))return;const d=await api('/api/my/subscriptions');$('#subscriptionsList').innerHTML=d.subscriptions.length?d.subscriptions.map(s=>`<article><strong>${s.eggs_per_delivery} ovos · ${freq[s.frequency]}</strong><p><span class="status">${substat[s.status]}</span></p></article>`).join(''):'<p>Ainda não existem subscrições.</p>'}loadSubs().catch(console.error);async function profile(){if(!$('#profileForm'))return;await session();const f=$('#profileForm');f.name.value=me.name;f.username.value=me.username||'';f.email.value=me.email;f.notificationsEnabled.checked=!!me.notifications_enabled;f.onsubmit=async e=>{e.preventDefault();const d=new FormData(f);await api('/api/my/profile',{method:'PATCH',body:JSON.stringify({name:d.get('name'),username:d.get('username'),notificationsEnabled:!!d.get('notificationsEnabled')})});notice('Perfil atualizado.')}}profile().catch(console.error);$('#passwordForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f);if(d.get('newPassword')!==d.get('newPasswordConfirmation'))return notice('As palavras-passe não coincidem.');await api('/api/my/password',{method:'PATCH',body:JSON.stringify(Object.fromEntries(d))});f.reset();notice('Palavra-passe alterada.')});const dd=$('#deleteAccountDialog'),di=$('#deleteConfirmation'),db=$('#confirmDeleteAccount'),dm=$('#deleteAccountMessage');$('#openDeleteAccount')?.addEventListener('click',()=>{di.value='';db.disabled=true;dd.showModal();di.focus()});di?.addEventListener('input',()=>db.disabled=di.value!=='ELIMINAR');db?.addEventListener('click',async()=>{if(di.value!=='ELIMINAR')return;db.disabled=true;db.textContent='A eliminar...';try{await api('/api/my/account',{method:'DELETE',body:JSON.stringify({confirmation:di.value})});location.href='/?conta=eliminada'}catch(x){dm.textContent=x.message;db.disabled=false}});if(new URLSearchParams(location.search).has('login'))auth('login');
 // Mantem o simbolo do Livro de Reclamacoes pequeno e totalmente visivel no rodape.
 function resizeLivroReclamacoesIcon() {
   const title = [...document.querySelectorAll('svg title')].find(node =>
