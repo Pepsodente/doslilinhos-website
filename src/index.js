@@ -2442,7 +2442,345 @@ function receiptToFiscalSnapshot(
   };
 }
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
-if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
+if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if (
+  orderId &&
+  [
+    'checkout.session.completed',
+    'checkout.session.async_payment_succeeded'
+  ].includes(event.type) &&
+  session.payment_status === 'paid'
+) {
+  const order =
+    await orderDetails(
+      e,
+      orderId
+    );
+
+  if (order) {
+    /*
+     * O webhook da Stripe pode ser repetido.
+     * A atualização do pagamento e a criação do recibo
+     * têm de ser idempotentes.
+     */
+
+    if (order.payment_status !== 'paid') {
+      await e.DB.batch([
+        e.DB.prepare(`
+          UPDATE orders
+          SET
+            payment_status = 'paid',
+            approval_status = 'paid',
+            invoice_status = 'pending',
+            receipt_status = 'pending',
+            paid_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(orderId),
+
+        e.DB.prepare(`
+          UPDATE payments
+          SET
+            status = 'paid',
+            provider_payment_intent = ?,
+            paid_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE provider_session_id = ?
+        `).bind(
+          session.payment_intent || null,
+          session.id
+        ),
+
+        e.DB.prepare(`
+          INSERT INTO workflow_events (
+            entity_type,
+            entity_id,
+            event_type,
+            from_status,
+            to_status,
+            note,
+            actor
+          )
+          VALUES (
+            'order',
+            ?,
+            'payment_received',
+            ?,
+            'paid',
+            ?,
+            'stripe'
+          )
+        `).bind(
+          orderId,
+          order.payment_status || 'pending',
+          session.payment_intent || session.id
+        )
+      ]);
+    }
+
+    /*
+     * Recuperar novamente a encomenda para obter
+     * paid_at e o estado atualizado.
+     */
+    const paidOrder =
+      await orderDetails(
+        e,
+        orderId
+      );
+
+    if (!paidOrder) {
+      throw new Error(
+        'A encomenda paga não pôde ser recuperada.'
+      );
+    }
+
+    /*
+     * A fotografia fiscal já foi congelada
+     * antes de criar a sessão Stripe.
+     */
+    const fiscalSnapshot =
+      await loadFrozenFiscalSnapshot(
+        e,
+        orderId
+      );
+
+    const paidAmount = Number(
+      session.amount_total ||
+      paidOrder.total_cents ||
+      0
+    );
+
+    if (
+      paidAmount !==
+      fiscalSnapshot.grossTotalCents
+    ) {
+      await audit(
+        e.DB,
+        {
+          entityType: 'payment',
+          entityId: orderId,
+          reference:
+            paidOrder.order_number,
+          action:
+            'payment_fiscal_mismatch',
+          fromStatus:
+            paidOrder.payment_status,
+          toStatus:
+            'manual_review',
+          actor: 'stripe',
+          result: 'failed',
+          amountCents:
+            paidAmount,
+          providerReference:
+            session.payment_intent ||
+            session.id,
+          webhookEventId:
+            event.id,
+          details: {
+            stripeAmountCents:
+              paidAmount,
+            fiscalAmountCents:
+              fiscalSnapshot.grossTotalCents
+          }
+        }
+      );
+
+      throw new Error(
+        'O valor pago não coincide com a fotografia fiscal da encomenda.'
+      );
+    }
+
+    /*
+     * Obter o método de pagamento.
+     * Se a consulta complementar à Stripe falhar,
+     * usa "Pagamento online" sem impedir o recibo.
+     */
+    const paymentDetails =
+      await getStripePaymentDetails(
+        e,
+        session
+      );
+
+    const paymentReference =
+      session.payment_intent ||
+      session.id;
+
+    const paidAt =
+      paidOrder.paid_at
+        ? new Date(
+            String(
+              paidOrder.paid_at
+            ).includes('T')
+              ? paidOrder.paid_at
+              : `${paidOrder.paid_at.replace(
+                  ' ',
+                  'T'
+                )}Z`
+          )
+        : new Date();
+
+    /*
+     * createPaymentReceipt() verifica primeiro
+     * se já existe um recibo para esta encomenda.
+     * Um webhook repetido não cria outro número.
+     */
+    const receipt =
+      await createPaymentReceipt({
+        env: e,
+        order: paidOrder,
+        fiscalSnapshot,
+        paymentReference,
+        paymentMethod:
+          paymentDetails.method,
+        paymentBrand:
+          paymentDetails.brand,
+        paymentLast4:
+          paymentDetails.last4,
+        paidAt
+      });
+
+    await audit(
+      e.DB,
+      {
+        entityType: 'payment_receipt',
+        entityId: receipt.id,
+        reference:
+          receipt.receipt_number,
+        action:
+          'payment_receipt_created',
+        fromStatus:
+          'pending',
+        toStatus:
+          'issued',
+        actor: 'stripe',
+        amountCents:
+          receipt.gross_total_cents,
+        providerReference:
+          paymentReference,
+        webhookEventId:
+          event.id,
+        details: {
+          orderId,
+          orderNumber:
+            paidOrder.order_number,
+          paymentMethod:
+            receipt.payment_method,
+          paymentBrand:
+            receipt.payment_brand,
+          paymentLast4:
+            receipt.payment_last4,
+          netTotalCents:
+            receipt.net_total_cents,
+          vatTotalCents:
+            receipt.vat_total_cents,
+          grossTotalCents:
+            receipt.gross_total_cents
+        }
+      }
+    );
+
+    const emailData = {
+      ...paidOrder,
+      ...flowUrls(
+        e,
+        orderId
+      ),
+
+      totalCents:
+        receipt.gross_total_cents,
+
+      netTotalCents:
+        receipt.net_total_cents,
+
+      vatTotalCents:
+        receipt.vat_total_cents,
+
+      receiptNumber:
+        receipt.receipt_number,
+
+      receiptUrl:
+        `${e.SITE_URL}/api/my/orders/${orderId}/receipt.pdf`,
+
+      paymentMethod:
+        receiptPaymentLabel(
+          receipt
+        ),
+
+      paidAt:
+        receipt.paid_at
+    };
+
+    /*
+     * Enviar os emails apenas na primeira passagem.
+     * Um webhook repetido pode reutilizar o recibo,
+     * mas não deve repetir todos os emails.
+     */
+    if (
+      order.payment_status !== 'paid'
+    ) {
+      await Promise.allSettled([
+        sendEmail(
+          e,
+          e.DB,
+          {
+            type: 'payment_received',
+            to: paidOrder.email,
+            data: emailData,
+            customerId:
+              paidOrder.customer_id,
+            orderId
+          }
+        ),
+
+        sendEmail(
+          e,
+          e.DB,
+          {
+            type: 'payment_received',
+            to: e.ADMIN_EMAIL,
+            data: {
+              ...emailData,
+              name: 'Administração'
+            },
+            customerId:
+              paidOrder.customer_id,
+            orderId
+          }
+        )
+      ]);
+    }
+
+    await audit(
+      e.DB,
+      {
+        entityType: 'payment',
+        entityId: orderId,
+        reference:
+          paidOrder.order_number,
+        action:
+          'payment_received',
+        fromStatus:
+          order.payment_status ||
+          'pending',
+        toStatus:
+          'paid',
+        actor: 'stripe',
+        amountCents:
+          receipt.gross_total_cents,
+        providerReference:
+          paymentReference,
+        webhookEventId:
+          event.id,
+        details: {
+          receiptId:
+            receipt.id,
+          receiptNumber:
+            receipt.receipt_number
+        }
+      }
+    );
+  }
+}
+else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
 if(p==='/api/admin/audit'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const entity=u.searchParams.get('entity')||'',result=u.searchParams.get('result')||'',where=[],bind=[];if(entity){where.push('entity_type=?');bind.push(entity)}if(result){where.push('result=?');bind.push(result)}const q=await e.DB.prepare(`SELECT * FROM audit_log ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY created_at DESC LIMIT 500`).bind(...bind).all();return out({events:q.results})}
 
 if(p==='/api/admin/workflow'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const a=await e.DB.prepare(`SELECT o.id,o.order_number,o.status,o.approval_status,o.total_cents,o.payment_status,o.payment_url,o.payment_expires_at,o.incident_status,o.refund_status,o.refund_amount_cents,o.refund_reference,o.invoice_status,o.invoice_document_id,o.credit_note_status,o.credit_note_document_id,o.created_at,c.name,c.email FROM orders o JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC`).all(),b=await e.DB.prepare(`SELECT s.*,c.name,c.email,p.name product FROM subscriptions s JOIN customers c ON c.id=s.customer_id JOIN products p ON p.id=s.product_id ORDER BY s.created_at DESC`).all();return out({orders:a.results,subscriptions:b.results})}
