@@ -4,7 +4,17 @@ import {
   rgb
 } from 'pdf-lib';
 const RESEND_API='https://api.resend.com/emails';
-const e=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'','>':'>','"':'&quot;',"'":'&#39;'}[c]));
+const e = value =>
+  String(value ?? '').replace(
+    /[&<>"']/g,
+    character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[character]
+  );
 const euros=c=>new Intl.NumberFormat('pt-PT',{style:'currency',currency:'EUR'}).format((Number(c)||0)/100);
 /* =========================================================
    CÁLCULOS FISCAIS E UTILITÁRIOS DOS RECIBOS
@@ -1296,17 +1306,11 @@ let wm=p.match(/^\/api\/admin\/orders\/(\d+)\/(approve|reject|preparing|ready|co
     }
   );
 
-  return out({
+ return out({
     success: true,
-
-    status:
-      'awaiting_payment',
-
-    paymentUrl:
-      session.url,
-
-    paymentExpiresAt:
-      expiry,
+    status: 'awaiting_payment',
+    paymentUrl: session.url,
+    paymentExpiresAt: expiry,
 
     fiscalSummary: {
       discountBps,
@@ -1326,6 +1330,120 @@ let wm=p.match(/^\/api\/admin\/orders\/(\d+)\/(approve|reject|preparing|ready|co
       shippingGrossCents
     }
   });
+}
+
+const next = {
+  reject: 'cancelled',
+  preparing: 'confirmed',
+  ready: 'ready',
+  complete: 'completed'
+}[action];
+
+const approvalState = {
+  reject: 'rejected',
+  preparing: 'preparing',
+  ready: 'ready',
+  complete: 'completed'
+}[action];
+
+await e.DB.prepare(`
+  UPDATE orders
+  SET
+    status = ?,
+    approval_status = ?,
+    approval_note = ?,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?
+`)
+  .bind(
+    next,
+    approvalState,
+    b.note || null,
+    id
+  )
+  .run();
+
+await e.DB.prepare(`
+  INSERT INTO workflow_events (
+    entity_type,
+    entity_id,
+    event_type,
+    from_status,
+    to_status,
+    note,
+    actor
+  )
+  VALUES (
+    'order',
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    'admin'
+  )
+`)
+  .bind(
+    id,
+    action,
+    o.status,
+    next,
+    b.note || null
+  )
+  .run();
+
+await audit(
+  e.DB,
+  {
+    entityType: 'order',
+    entityId: id,
+    reference: o.order_number,
+    action,
+
+    fromStatus:
+      o.approval_status || o.status,
+
+    toStatus:
+      approvalState,
+
+    actor: 'admin',
+
+    reason:
+      b.note || null,
+
+    ipHash:
+      await requestHash(r)
+  }
+);
+
+await sendEmail(
+  e,
+  e.DB,
+  {
+    type: {
+      reject: 'order_rejected',
+      preparing: 'order_preparing',
+      ready: 'order_ready',
+      complete: 'order_completed'
+    }[action],
+
+    to: o.email,
+    customerId: o.customer_id,
+    orderId: id,
+
+    data: {
+      ...o,
+      ...flowUrls(e, id),
+      note: b.note
+    }
+  }
+);
+
+return out({
+  success: true,
+  status: next
+});
+}
 const next={reject:'cancelled',preparing:'confirmed',ready:'ready',complete:'completed'}[action],approvalState={reject:'rejected',preparing:'preparing',ready:'ready',complete:'completed'}[action];await e.DB.prepare(`UPDATE orders SET status=?,approval_status=?,approval_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,approvalState,b.note||null,id).run();await e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,?,?,?,?,'admin')`).bind(id,action,o.status,next,b.note||null).run();await audit(e.DB,{entityType:'order',entityId:id,reference:o.order_number,action,fromStatus:o.approval_status||o.status,toStatus:approvalState,actor:'admin',reason:b.note||null,ipHash:await requestHash(r)});await sendEmail(e,e.DB,{type:{reject:'order_rejected',preparing:'order_preparing',ready:'order_ready',complete:'order_completed'}[action],to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),note:b.note}});return out({success:true,status:next})}
 wm=p.match(/^\/api\/admin\/subscriptions\/(\d+)\/(approve|reject)$/);if(wm&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+wm[1],action=wm[2],b=await r.json(),x=await e.DB.prepare(`SELECT s.*,c.name,c.email,p.name product FROM subscriptions s JOIN customers c ON c.id=s.customer_id JOIN products p ON p.id=s.product_id WHERE s.id=?`).bind(id).first();if(!x)return out({error:'Subscrição não encontrada.'},404);const next=action==='approve'?'active':'rejected';await e.DB.prepare(`UPDATE subscriptions SET status=?,approval_note=?,price_cents=COALESCE(?,price_cents),first_delivery_on=COALESCE(?,first_delivery_on),pickup_location=COALESCE(?,pickup_location),approved_at=CASE WHEN ?='active' THEN CURRENT_TIMESTAMP ELSE approved_at END,rejected_at=CASE WHEN ?='rejected' THEN CURRENT_TIMESTAMP ELSE rejected_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,b.note||null,b.priceCents||null,b.firstDelivery||null,b.location||null,next,next,id).run();await sendEmail(e,e.DB,{type:action==='approve'?'subscription_approved':'subscription_rejected',to:x.email,customerId:x.customer_id,subscriptionId:id,data:{...x,note:b.note,quantity:`${x.eggs_per_delivery} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[x.frequency]||x.frequency,priceCents:b.priceCents||0,firstDelivery:b.firstDelivery,url:`${e.SITE_URL}/subscricoes.html`,productsUrl:`${e.SITE_URL}/produtos.html`}});return out({success:true,status:next})}
 if(p==='/api/stock'){const pr=await product(e);return out({success:true,stock:await stock(e,pr.id),product:pr})}if(p==='/api/auth/me'){const c=await customer(r,e);return out({success:true,authenticated:!!c,customer:c})}if(p==='/api/auth/register'&&m==='POST'){const b=await r.json(),name=String(b.name||'').trim(),username=String(b.username||'').trim().toLowerCase(),email=String(b.email||'').trim().toLowerCase(),pw=String(b.password||'');if(!/^[a-z0-9._-]{3,30}$/.test(username)||pw.length<8||pw!==b.passwordConfirmation||!b.privacyAccepted)return out({success:false,error:'Confirma todos os dados e as palavras-passe.'},400);if(await e.DB.prepare('SELECT id FROM customers WHERE email=? OR username=?').bind(email,username).first())return out({success:false,error:'Email ou nome de utilizador já existente.'},409);const q=await e.DB.prepare(`INSERT INTO customers(name,username,email,password_hash,notifications_enabled,privacy_accepted_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(name,username,email,await hashPass(pw),b.notificationsEnabled?1:0).run();return out({success:true},201,{'set-cookie':setcookie(await makeSession(q.meta.last_row_id,e))})}if(p==='/api/auth/recover'&&m==='POST'){const b=await r.json(),identifier=String(b.identifier||'').trim().toLowerCase(),generic={success:true,message:'Se encontrarmos uma conta correspondente, enviaremos um email com as instruções.'};if(!identifier)return out(generic);const ih=await sha(`recover:${identifier}`),recent=await e.DB.prepare(`SELECT COUNT(*) n FROM password_reset_rate_limits WHERE identifier_hash=? AND requested_at>datetime('now','-15 minutes')`).bind(ih).first();if(Number(recent?.n||0)>=3)return out(generic);await e.DB.prepare('INSERT INTO password_reset_rate_limits(identifier_hash) VALUES(?)').bind(ih).run();const c=await e.DB.prepare(`SELECT id,name,username,email FROM customers WHERE active=1 AND (lower(email)=? OR lower(username)=?)`).bind(identifier,identifier).first();if(c){await e.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE customer_id=? AND used_at IS NULL`).bind(c.id).run();const raw=b64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g,''),th=await sha(raw),ip=r.headers.get('cf-connecting-ip')||'',iph=ip?await sha(`reset-ip:${ip}`):null;await e.DB.prepare(`INSERT INTO password_reset_tokens(customer_id,token_hash,expires_at,requested_ip_hash) VALUES(?,?,datetime('now','+30 minutes'),?)`).bind(c.id,th,iph).run();await sendEmail(e,e.DB,{type:'access_recovery',to:c.email,customerId:c.id,data:{name:c.name,username:c.username,resetUrl:`${e.SITE_URL}/repor-password.html?token=${encodeURIComponent(raw)}`}})}return out(generic)}
