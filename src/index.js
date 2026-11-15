@@ -2447,6 +2447,111 @@ function receiptToFiscalSnapshot(
         : []
   };
 }
+/* =========================================================
+   REFERÊNCIA CURTA PARA ATGO / PORTAL DAS FINANÇAS
+   ========================================================= */
+
+const AT_PRODUCT_CODES = Object.freeze({
+  'EGG-06': 'OV06',
+  'EGG-12': 'OV12',
+  'EGG-18': 'OV18',
+  'EGG-30': 'OV30',
+
+  'CHK-WHOLE': 'FRIN',
+  'CHK-CUT': 'FRPE',
+
+  'VEG-FRESH': 'HORT',
+  'FRUIT-FRESH': 'FRUT',
+
+  'ALHEIRA': 'ALHE',
+  'CHOURICO': 'CHOU',
+  'JAM': 'DOCE',
+
+  'DRIED-FRUIT-NATURAL': 'FSNA',
+  'DRIED-FRUIT-PREPARED': 'FSPR',
+
+  'BABY-PORRIDGE': 'PABE',
+  'PORRIDGE-GENERAL': 'PAPA',
+
+  'HOMEMADE-CAKE': 'BOLO',
+  'HOMEMADE-BISCUITS': 'BOLC',
+
+  'DELIVERY-INDEPENDENT': 'ENTR'
+});
+
+function formatAtQuantity(value) {
+  const quantity = Number(value);
+
+  if (
+    !Number.isFinite(quantity) ||
+    quantity <= 0
+  ) {
+    throw new Error(
+      'Quantidade inválida para a referência AT.'
+    );
+  }
+
+  return new Intl.NumberFormat(
+    'pt-PT',
+    {
+      useGrouping: false,
+      maximumFractionDigits: 3
+    }
+  ).format(quantity);
+}
+
+function buildAtOrderReference(
+  orderNumber,
+  fiscalLines = []
+) {
+  const safeOrderNumber = String(
+    orderNumber || ''
+  )
+    .trim()
+    .replace(/\s+/g, '');
+
+  if (!safeOrderNumber) {
+    throw new Error(
+      'A encomenda não tem número.'
+    );
+  }
+
+  const items = fiscalLines.map(line => {
+    const productCode = String(
+      line.productCode || ''
+    ).trim();
+
+    const shortCode =
+      AT_PRODUCT_CODES[productCode];
+
+    if (!shortCode) {
+      throw new Error(
+        `O produto ${productCode} não tem código curto para a AT.`
+      );
+    }
+
+    const quantity =
+      line.type === 'shipping'
+        ? 1
+        : Number(line.quantity);
+
+    return (
+      `${shortCode}x` +
+      formatAtQuantity(quantity)
+    );
+  });
+
+  if (!items.length) {
+    throw new Error(
+      'A encomenda não contém artigos para a referência AT.'
+    );
+  }
+
+  return [
+    `E:${safeOrderNumber}`,
+    ...items
+  ].join('//');
+}
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if (
   orderId &&
