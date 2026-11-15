@@ -382,3 +382,29 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
 }
 
 .order-document:last-child {
+/* Referência ATGo / Portal das Finanças */
+
+.at-reference-preview {
+  max-width: 260px;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: #315f37;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.copy-at-reference.copied {
+  background: #55795c;
+  color: #ffffff;
+}
+
+.copy-at-reference:disabled,
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
