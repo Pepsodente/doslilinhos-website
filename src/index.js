@@ -2895,7 +2895,113 @@ const paymentReference =
 else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
 if(p==='/api/admin/audit'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const entity=u.searchParams.get('entity')||'',result=u.searchParams.get('result')||'',where=[],bind=[];if(entity){where.push('entity_type=?');bind.push(entity)}if(result){where.push('result=?');bind.push(result)}const q=await e.DB.prepare(`SELECT * FROM audit_log ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY created_at DESC LIMIT 500`).bind(...bind).all();return out({events:q.results})}
 
-if(p==='/api/admin/workflow'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const a=await e.DB.prepare(`SELECT o.id,o.order_number,o.status,o.approval_status,o.total_cents,o.payment_status,o.payment_url,o.payment_expires_at,o.incident_status,o.refund_status,o.refund_amount_cents,o.refund_reference,o.invoice_status,o.invoice_document_id,o.credit_note_status,o.credit_note_document_id,o.created_at,c.name,c.email FROM orders o JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC`).all(),b=await e.DB.prepare(`SELECT s.*,c.name,c.email,p.name product FROM subscriptions s JOIN customers c ON c.id=s.customer_id JOIN products p ON p.id=s.product_id ORDER BY s.created_at DESC`).all();return out({orders:a.results,subscriptions:b.results})}
+if (
+  p === '/api/admin/workflow' &&
+  m === 'GET'
+) {
+  if (!adminOK(r, e)) {
+    return out(
+      {
+        error: 'Não autorizado.'
+      },
+      401
+    );
+  }
+
+  const ordersResult =
+    await e.DB.prepare(`
+      SELECT
+        o.id,
+        o.order_number,
+        o.status,
+        o.approval_status,
+        o.total_cents,
+        o.payment_status,
+        o.payment_url,
+        o.payment_expires_at,
+        o.incident_status,
+        o.refund_status,
+        o.refund_amount_cents,
+        o.refund_reference,
+        o.invoice_status,
+        o.invoice_document_id,
+        o.credit_note_status,
+        o.credit_note_document_id,
+        o.receipt_id,
+        o.receipt_status,
+        o.created_at,
+        c.name,
+        c.email
+
+      FROM orders o
+
+      JOIN customers c
+        ON c.id = o.customer_id
+
+      ORDER BY o.created_at DESC
+    `).all();
+
+  const subscriptionsResult =
+    await e.DB.prepare(`
+      SELECT
+        s.*,
+        c.name,
+        c.email,
+        p.name AS product
+
+      FROM subscriptions s
+
+      JOIN customers c
+        ON c.id = s.customer_id
+
+      JOIN products p
+        ON p.id = s.product_id
+
+      ORDER BY s.created_at DESC
+    `).all();
+
+  const workflowOrders =
+    await Promise.all(
+      (ordersResult.results || []).map(
+        async order => {
+          let atReference = null;
+          let atReferenceError = null;
+
+          try {
+            const fiscalSnapshot =
+              await loadFrozenFiscalSnapshot(
+                e,
+                order.id
+              );
+
+            atReference =
+              buildAtOrderReference(
+                order.order_number,
+                fiscalSnapshot.lines
+              );
+          } catch (error) {
+            atReferenceError =
+              error instanceof Error
+                ? error.message
+                : String(error);
+          }
+
+          return {
+            ...order,
+            atReference,
+            atReferenceError
+          };
+        }
+      )
+    );
+
+  return out({
+    orders: workflowOrders,
+
+    subscriptions:
+      subscriptionsResult.results || []
+  });
+}
 let fiscal=p.match(/^\/api\/admin\/orders\/(\d+)\/(invoice|credit-note)$/);if(fiscal&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+fiscal[1],kind=fiscal[2],b=await r.json(),o=await orderDetails(e,id);if(!o)return out({error:'Pedido não encontrado.'},404);const number=String(b.documentNumber||'').trim(),date=String(b.documentDate||'').trim(),total=Number(b.totalCents);if(!number||!date||!Number.isInteger(total)||total<0)return out({error:'Confirma número, data e total do documento.'},400);if(kind==='invoice'&&o.payment_status!=='paid')return out({error:'A fatura só pode ser registada após pagamento confirmado.'},409);if(kind==='invoice'&&o.invoice_status==='issued')return out({error:'A encomenda já tem documento fiscal registado.'},409);if(kind==='credit-note'&&o.invoice_status!=='issued')return out({error:'Não existe fatura registada para associar à nota de crédito.'},409);if(kind==='credit-note'&&!o.incident_status)return out({error:'Regista primeiro o problema ou devolução.'},409);const type=kind==='invoice'?(b.documentType==='invoice'?'invoice':'invoice_receipt'):'credit_note',original=kind==='credit-note'?o.invoice_document_id:null;const q=await e.DB.prepare(`INSERT INTO fiscal_documents(order_id,document_type,document_number,document_date,total_cents,original_document_id,document_url,notes) VALUES(?,?,?,?,?,?,?,?)`).bind(id,type,number,date,total,original,b.documentUrl||null,b.notes||null).run();if(kind==='invoice')await e.DB.prepare(`UPDATE orders SET invoice_status='issued',invoice_document_id=?,approval_status='invoiced',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.meta.last_row_id,id).run();else await e.DB.prepare(`UPDATE orders SET credit_note_status='issued',credit_note_document_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.meta.last_row_id,id).run();const action=kind==='invoice'?'invoice_registered':'credit_note_registered';await audit(e.DB,{entityType:'fiscal_document',entityId:id,reference:o.order_number,action,fromStatus:kind==='invoice'?o.invoice_status:o.credit_note_status,toStatus:'issued',actor:'admin',amountCents:total,reason:b.notes||null,providerReference:number,ipHash:await requestHash(r),details:{documentType:type,documentDate:date,originalDocumentId:original}});await sendEmail(e,e.DB,{type:action,to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),documentTypeLabel:type==='invoice'?'Fatura':type==='invoice_receipt'?'Fatura-recibo':'Nota de crédito',documentNumber:number,documentDate:date,totalCents:total}});return out({success:true,documentId:q.meta.last_row_id,status:'issued'})}
 if(p==='/api/admin/fiscal-documents'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const q=await e.DB.prepare(`SELECT f.*,o.order_number,c.name,c.email FROM fiscal_documents f JOIN orders o ON o.id=f.order_id JOIN customers c ON c.id=o.customer_id ORDER BY f.created_at DESC LIMIT 500`).all();return out({documents:q.results})}
 let incident=p.match(/^\/api\/admin\/orders\/(\d+)\/incident$/);if(incident&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+incident[1],b=await r.json(),o=await orderDetails(e,id);if(!o)return out({error:'Pedido não encontrado.'},404);if(String(b.confirmation||'')!=='ANULAR')return out({error:'Escreve ANULAR para confirmar.'},400);if(o.incident_status)return out({error:'Já existe um incidente registado nesta encomenda.'},409);const reason=String(b.reason||'').trim();if(reason.length<5)return out({error:'Indica o motivo interno.'},400);const paid=o.payment_status==='paid',mode=paid?(b.refundMode||'full'):'none';let refund=null,refundAmount=0;await e.DB.prepare(`UPDATE orders SET incident_status='reported',incident_reason=?,incident_customer_note=?,incident_reported_at=CURRENT_TIMESTAMP,approval_status='issue_reported',status='cancelled',credit_note_status=CASE WHEN invoice_status='issued' THEN 'pending' ELSE credit_note_status END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(reason,b.customerNote||null,id).run();await audit(e.DB,{entityType:'order',entityId:id,reference:o.order_number,action:'issue_reported',fromStatus:o.approval_status||o.status,toStatus:'issue_reported',actor:'admin',reason,ipHash:await requestHash(r),details:{customerNote:b.customerNote||null,refundMode:mode}});if(paid&&mode!=='none'){const payment=await e.DB.prepare(`SELECT * FROM payments WHERE order_id=? AND status='paid' ORDER BY id DESC LIMIT 1`).bind(id).first();if(!payment)throw Error('Pagamento confirmado não encontrado.');let pi=payment.provider_payment_intent;if(!pi&&payment.provider_session_id){const session=await stripeGet(e,`checkout/sessions/${payment.provider_session_id}`);pi=session.payment_intent;await e.DB.prepare(`UPDATE payments SET provider_payment_intent=? WHERE id=?`).bind(pi,payment.id).run()}if(!pi)throw Error('Referência de pagamento Stripe não encontrada.');refundAmount=mode==='partial'?Number(b.amountCents):Number(payment.amount_cents);if(!Number.isInteger(refundAmount)||refundAmount<1||refundAmount>Number(payment.amount_cents))throw Error('Valor de reembolso inválido.');refund=await stripePost(e,'refunds',{'payment_intent':pi,'amount':String(refundAmount),'metadata[order_id]':String(id),'metadata[order_number]':o.order_number,'reason':'requested_by_customer'});await e.DB.prepare(`UPDATE orders SET refund_status='pending',refund_amount_cents=?,refund_reference=?,payment_status='refund_pending',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(refundAmount,refund.id,id).run();await audit(e.DB,{entityType:'refund',entityId:id,reference:o.order_number,action:'refund_requested',fromStatus:'paid',toStatus:'pending',actor:'admin',amountCents:refundAmount,reason,providerReference:refund.id,ipHash:await requestHash(r)})}const stateLabel=paid&&mode!=='none'?'Reembolso em processamento':'Pedido anulado';await sendEmail(e,e.DB,{type:'issue_reported',to:o.email,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),stateLabel}});await sendEmail(e,e.DB,{type:'issue_reported',to:e.ADMIN_EMAIL,customerId:o.customer_id,orderId:id,data:{...o,...flowUrls(e,id),name:'Administração',stateLabel:`${stateLabel} · ${reason}`}});return out({success:true,incident:'reported',refundStatus:refund?'pending':'not_required'})}
