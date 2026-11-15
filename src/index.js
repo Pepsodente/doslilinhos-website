@@ -235,7 +235,7 @@ function formatReceiptNumber(
   sequence
 ) {
   return [
-    'DL-RC',
+    'RC',
     String(year),
     String(sequence).padStart(6, '0')
   ].join('-');
@@ -1360,7 +1360,7 @@ async function generateReceiptPdf({
 
   drawPdfText(
     page,
-    `Documento: ${receiptNumber}`,
+    `N.º do recibo: ${receiptNumber}`,
     {
       x: margin,
       y,
@@ -1372,7 +1372,7 @@ async function generateReceiptPdf({
 
   drawPdfText(
     page,
-    `Encomenda: ${order.order_number}`,
+    `N.º da encomenda: ${order.order_number}`,
     {
       x: margin,
       y: y - 18,
@@ -2259,7 +2259,13 @@ async function getStripePaymentDetails(
           paymentIntentId
         )}?expand[]=payment_method`
       );
-
+    
+    details.reference =
+      paymentIntent.id ||
+      checkoutSession.payment_intent ||
+      checkoutSession.id ||
+      null;
+    
     let paymentMethod =
       paymentIntent.payment_method;
 
