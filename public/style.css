@@ -229,3 +229,156 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
 .product-showcase.product-icons img{display:block!important;width:auto!important;height:auto!important;max-width:100%!important;max-height:520px!important;object-fit:contain!important;background:transparent!important;filter:none!important}
 @media(max-width:850px){.product-showcase.product-icons{grid-template-columns:1fr!important;gap:38px!important;max-width:540px!important}.product-showcase.product-icons img{max-height:460px!important}}
 @media(max-width:520px){.product-showcase.product-icons{padding-inline:10px!important;gap:28px!important}.product-showcase.product-icons img{max-height:390px!important}}
+/* =========================================================
+   ENCOMENDAS E DOCUMENTOS
+   ========================================================= */
+
+.order-card {
+  margin-bottom: 24px;
+  padding: 26px;
+  border: 1px solid #dce2da;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow:
+    0 8px 28px
+    rgba(28, 45, 32, 0.07);
+}
+
+.order-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.order-reference {
+  margin: 0 0 5px;
+  color: #68736b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.order-card-head h2 {
+  margin: 0 0 12px;
+  color: #315f37;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.order-status {
+  display: inline-flex;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: #e9ede9;
+  color: #4f5d52;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.order-status.payment-paid {
+  background: #dff3e5;
+  color: #176a34;
+}
+
+.order-status.payment-pending {
+  background: #fff0b8;
+  color: #886400;
+}
+
+.order-status.payment-refunded,
+.order-status.payment-refund_pending,
+.order-status.payment-refund_failed {
+  background: #fde0df;
+  color: #a22626;
+}
+
+.order-total {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.order-total small,
+.order-total strong {
+  display: block;
+}
+
+.order-total small {
+  margin-bottom: 3px;
+  color: #68736b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.order-total strong {
+  color: #315f37;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.order-summary {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 15px;
+  margin-top: 22px;
+  padding: 17px;
+  border-radius: 9px;
+  background: #f6f6f4;
+}
+
+.order-summary span,
+.order-summary strong {
+  display: block;
+}
+
+.order-summary span {
+  margin-bottom: 4px;
+  color: #68736b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.order-summary strong {
+  color: #343434;
+  font-size: 14px;
+}
+
+.order-payment-action {
+  margin-top: 18px;
+}
+
+.order-payment-action .button {
+  min-height: 48px;
+}
+
+.order-documents {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #dce2da;
+}
+
+.order-documents h3 {
+  margin: 0 0 12px;
+  color: #315f37;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.order-document {
+  display: grid;
+  grid-template-columns:
+    44px minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid #edf0ec;
+}
+
+.order-document:last-child {
