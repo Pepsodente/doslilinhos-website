@@ -3386,6 +3386,285 @@ wm=p.match(/^\/api\/admin\/subscriptions\/(\d+)\/(approve|reject)$/);if(wm&&m===
    Não cria recibo, não marca pagamento e não envia email.
    ========================================================= */
 
+/* =========================================================
+   DOWNLOAD OFICIAL DO RECIBO
+   Requer sessão, encomenda do cliente e recibo emitido.
+   ========================================================= */
+
+const officialReceiptMatch =
+  p.match(
+    /^\/api\/my\/orders\/(\d+)\/receipt\.pdf$/
+  );
+
+if (
+  officialReceiptMatch &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const orderId = Number(
+    officialReceiptMatch[1]
+  );
+
+  if (
+    !Number.isInteger(orderId) ||
+    orderId < 1
+  ) {
+    return out(
+      {
+        error:
+          'Identificador da encomenda inválido.'
+      },
+      400
+    );
+  }
+
+  /*
+   * A consulta confirma simultaneamente:
+   *
+   * - que a encomenda existe;
+   * - que pertence ao cliente autenticado;
+   * - que existe um recibo associado;
+   * - que o recibo pertence à mesma encomenda.
+   */
+  const receipt = await e.DB.prepare(`
+    SELECT
+      r.*,
+
+      o.order_number,
+      o.customer_id,
+      o.payment_status,
+      o.payment_provider,
+      o.payment_reference,
+      o.paid_at AS order_paid_at,
+
+      c.name,
+      c.email
+
+    FROM payment_receipts r
+
+    JOIN orders o
+      ON o.id = r.order_id
+
+    JOIN customers c
+      ON c.id = o.customer_id
+
+    WHERE r.order_id = ?
+      AND o.customer_id = ?
+
+    LIMIT 1
+  `)
+    .bind(
+      orderId,
+      currentCustomer.id
+    )
+    .first();
+
+  if (!receipt) {
+    return out(
+      {
+        error:
+          'O recibo ainda não está disponível.'
+      },
+      404
+    );
+  }
+
+  if (
+    receipt.payment_status !== 'paid' &&
+    receipt.payment_status !== 'refunded'
+  ) {
+    return out(
+      {
+        error:
+          'O recibo só fica disponível após a confirmação do pagamento.'
+      },
+      409
+    );
+  }
+
+  const fiscalSnapshot =
+    receiptToFiscalSnapshot(
+      receipt
+    );
+
+  if (
+    !fiscalSnapshot.lines.length
+  ) {
+    return out(
+      {
+        error:
+          'O recibo não contém linhas da encomenda.'
+      },
+      500
+    );
+  }
+
+  const orderForPdf = {
+    id: Number(receipt.order_id),
+
+    customer_id:
+      Number(receipt.customer_id),
+
+    order_number:
+      receipt.order_number,
+
+    name:
+      receipt.name,
+
+    email:
+      receipt.email,
+
+    payment_status:
+      receipt.payment_status,
+
+    payment_provider:
+      receipt.payment_provider ||
+      'stripe',
+
+    payment_reference:
+      receipt.payment_reference,
+
+    paid_at:
+      receipt.paid_at ||
+      receipt.order_paid_at
+  };
+
+  const paymentDetails = {
+    methodLabel:
+      receiptPaymentLabel(
+        receipt
+      ),
+
+    provider:
+      receipt.payment_provider ||
+      'Stripe',
+
+    paidAt:
+      receipt.paid_at ||
+      receipt.order_paid_at,
+
+    reference:
+      receipt.payment_reference
+  };
+
+  const pdfBytes =
+    await generateReceiptPdf({
+      env: e,
+
+      order:
+        orderForPdf,
+
+      fiscalSnapshot,
+
+      receiptNumber:
+        receipt.receipt_number,
+
+      paymentDetails,
+
+      preview: false
+    });
+
+  /*
+   * Regista o download sem impedir a entrega do PDF
+   * se a auditoria falhar.
+   */
+  try {
+    await audit(
+      e.DB,
+      {
+        entityType:
+          'payment_receipt',
+
+        entityId:
+          receipt.id,
+
+        reference:
+          receipt.receipt_number,
+
+        action:
+          'payment_receipt_downloaded',
+
+        fromStatus:
+          'issued',
+
+        toStatus:
+          'issued',
+
+        actor:
+          `customer:${currentCustomer.id}`,
+
+        amountCents:
+          receipt.gross_total_cents,
+
+        providerReference:
+          receipt.payment_reference,
+
+        ipHash:
+          await requestHash(r),
+
+        details: {
+          orderId,
+          orderNumber:
+            receipt.order_number
+        }
+      }
+    );
+  } catch (auditError) {
+    console.error(
+      'Não foi possível auditar o download do recibo:',
+      auditError
+    );
+  }
+
+  const safeReceiptNumber =
+    String(
+      receipt.receipt_number
+    ).replace(
+      /[^A-Za-z0-9._-]/g,
+      '-'
+    );
+
+  return new Response(
+    pdfBytes,
+    {
+      status: 200,
+
+      headers: {
+        'content-type':
+          'application/pdf',
+
+        'content-disposition':
+          `attachment; filename="Dos-Lilinhos_Recibo_${safeReceiptNumber}.pdf"`,
+
+        'cache-control':
+          'private, no-store, max-age=0',
+
+        pragma:
+          'no-cache',
+
+        expires:
+          '0',
+
+        'x-content-type-options':
+          'nosniff',
+
+        'content-security-policy':
+          "default-src 'none'; frame-ancestors 'none'"
+      }
+    }
+  );
+}
 const receiptPreviewMatch =
   p.match(
     /^\/api\/my\/orders\/(\d+)\/receipt-preview\.pdf$/
