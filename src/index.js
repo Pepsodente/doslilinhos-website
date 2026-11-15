@@ -1135,30 +1135,38 @@ async function generateReceiptPdf({
   let logoImage = null;
 
   try {
-    const logoUrl = new URL(
-      '/logo-dos-lilinhos.png',
-      env.SITE_URL
+    const logoUrl =
+      `${env.SITE_URL}/logo-dos-lilinhos.png`;
+
+    const logoResponse = await fetch(
+      logoUrl,
+      {
+        headers: {
+          accept: 'image/png'
+        }
+      }
     );
 
-    const logoResponse = await env.ASSETS.fetch(
-      new Request(logoUrl)
-    );
-
-    if (logoResponse.ok) {
-      const logoBytes =
-        await logoResponse.arrayBuffer();
-
-      logoImage =
-        await pdfDocument.embedPng(
-          logoBytes
-        );
+    if (!logoResponse.ok) {
+      throw new Error(
+        `O símbolo devolveu HTTP ${logoResponse.status}.`
+      );
     }
+
+    const logoBytes =
+      await logoResponse.arrayBuffer();
+
+    logoImage =
+      await pdfDocument.embedPng(
+        logoBytes
+      );
   } catch (error) {
     console.error(
       'Não foi possível carregar o símbolo no recibo:',
       error
     );
   }
+
   pdfDocument.setTitle(
     `Recibo ${receiptNumber}`
   );
@@ -1220,17 +1228,9 @@ async function generateReceiptPdf({
           logoDimensions.height
       }
     );
-  } else {
-    drawPdfText(
-      page,
-      'DOS LILINHOS',
-      {
-        x: margin,
-        y,
-        size: 20,
-        font: bold,
-        color: green
-      }
+} else {
+    throw new Error(
+      'Não foi possível incorporar o símbolo Dos Lilinhos no PDF.'
     );
   }
 
