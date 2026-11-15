@@ -498,6 +498,340 @@ function resolveLineDiscountBps(
     ? itemDiscount
     : orderDiscount;
 }
+/* =========================================================
+   CONGELAR A FOTOGRAFIA FISCAL DA ENCOMENDA
+   ========================================================= */
+
+async function freezeOrderFiscalSnapshot(
+  env,
+  orderId,
+  options = {}
+) {
+  const items = await getOrderFiscalItems(
+    env,
+    orderId
+  );
+
+  if (!items.length) {
+    throw new Error(
+      'A encomenda não contém produtos.'
+    );
+  }
+
+  const orderDiscountBps =
+    validateDiscountBps(
+      options.discountBps || 0
+    );
+
+  const frozenLines = [];
+  const updateStatements = [];
+
+  for (const item of items) {
+    const unitsPerPack = Number(
+      item.units_per_pack
+    );
+
+    const productCode =
+      item.product_code ||
+      eggProductCode(unitsPerPack);
+
+    const taxProfile =
+      await getTaxProfile(
+        env,
+        productCode
+      );
+
+    if (
+      taxProfile.tax_treatment !== 'direct'
+    ) {
+      throw new Error(
+        `O produto ${productCode} exige uma composição fiscal própria.`
+      );
+    }
+
+    const quantity = Number(item.packs);
+
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 1
+    ) {
+      throw new Error(
+        'A quantidade da linha é inválida.'
+      );
+    }
+
+    const unitGrossCents = Number(
+      item.unit_gross_cents ??
+      item.unit_price_cents
+    );
+
+    const discountBps =
+      resolveLineDiscountBps(
+        item.discount_bps,
+        orderDiscountBps
+      );
+
+    const line = calculateFiscalLine({
+      unitGrossCents,
+      quantity,
+      discountBps,
+      vatRateBps: Number(
+        taxProfile.vat_rate_bps
+      )
+    });
+
+    const productName =
+      item.product_name_snapshot ||
+      (
+        unitsPerPack
+          ? `${item.current_product_name} · Caixa de ${unitsPerPack}`
+          : item.current_product_name
+      );
+
+    const frozenLine = {
+      type: 'product',
+      orderItemId: Number(item.id),
+
+      productCode,
+      productName,
+
+      vatCategory:
+        taxProfile.vat_category,
+
+      quantity,
+
+      unitsPerPack:
+        unitsPerPack || null,
+
+      quantityEggs:
+        Number(item.quantity_eggs || 0),
+
+      unitGrossCents:
+        line.unitGrossCents,
+
+      discountBps:
+        line.discountBps,
+
+      grossBeforeDiscountCents:
+        line.grossBeforeDiscountCents,
+
+      discountGrossCents:
+        line.discountGrossCents,
+
+      lineNetCents:
+        line.lineNetCents,
+
+      lineVatCents:
+        line.lineVatCents,
+
+      lineGrossCents:
+        line.lineGrossCents,
+
+      vatRateBps:
+        line.vatRateBps
+    };
+
+    frozenLines.push(frozenLine);
+
+    updateStatements.push(
+      env.DB.prepare(`
+        UPDATE order_items
+        SET
+          product_code = ?,
+          product_name_snapshot = ?,
+          vat_rate_bps = ?,
+          vat_category_snapshot = ?,
+          unit_gross_cents = ?,
+          discount_bps = ?,
+          line_net_cents = ?,
+          line_vat_cents = ?,
+          line_gross_cents = ?
+        WHERE id = ?
+          AND order_id = ?
+      `).bind(
+        frozenLine.productCode,
+        frozenLine.productName,
+        frozenLine.vatRateBps,
+        frozenLine.vatCategory,
+        frozenLine.unitGrossCents,
+        frozenLine.discountBps,
+        frozenLine.lineNetCents,
+        frozenLine.lineVatCents,
+        frozenLine.lineGrossCents,
+        frozenLine.orderItemId,
+        orderId
+      )
+    );
+  }
+
+  const order = await getOrderShipping(
+    env,
+    orderId
+  );
+
+  const shippingGrossCents = Number(
+    order.shipping_gross_cents || 0
+  );
+
+  if (
+    !Number.isInteger(shippingGrossCents) ||
+    shippingGrossCents < 0
+  ) {
+    throw new Error(
+      'O valor da entrega é inválido.'
+    );
+  }
+
+  if (shippingGrossCents > 0) {
+    const shippingCode =
+      order.shipping_service_code ||
+      'DELIVERY-INDEPENDENT';
+
+    const shippingProfile =
+      await getTaxProfile(
+        env,
+        shippingCode
+      );
+
+    if (
+      shippingProfile.tax_treatment !==
+      'direct'
+    ) {
+      throw new Error(
+        'O serviço de entrega não tem tratamento fiscal direto.'
+      );
+    }
+
+    const shippingTax =
+      splitVatFromGross(
+        shippingGrossCents,
+        Number(
+          shippingProfile.vat_rate_bps
+        )
+      );
+
+    const shippingLine = {
+      type: 'shipping',
+
+      productCode:
+        shippingCode,
+
+      productName:
+        order.shipping_service_name ||
+        'Serviço autónomo de entrega',
+
+      carrier:
+        order.shipping_carrier || null,
+
+      vatCategory:
+        shippingProfile.vat_category,
+
+      quantity: 1,
+
+      unitGrossCents:
+        shippingGrossCents,
+
+      discountBps: 0,
+
+      grossBeforeDiscountCents:
+        shippingGrossCents,
+
+      discountGrossCents: 0,
+
+      lineNetCents:
+        shippingTax.netCents,
+
+      lineVatCents:
+        shippingTax.vatCents,
+
+      lineGrossCents:
+        shippingTax.grossCents,
+
+      vatRateBps:
+        shippingTax.vatRateBps
+    };
+
+    frozenLines.push(shippingLine);
+
+    updateStatements.push(
+      env.DB.prepare(`
+        UPDATE orders
+        SET
+          shipping_service_code = ?,
+          shipping_net_cents = ?,
+          shipping_vat_cents = ?,
+          shipping_gross_cents = ?,
+          shipping_vat_rate_bps = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(
+        shippingLine.productCode,
+        shippingLine.lineNetCents,
+        shippingLine.lineVatCents,
+        shippingLine.lineGrossCents,
+        shippingLine.vatRateBps,
+        orderId
+      )
+    );
+  }
+
+  const totals =
+    calculateFiscalTotals(
+      frozenLines
+    );
+
+  if (
+    totals.grossTotalCents < 1
+  ) {
+    throw new Error(
+      'O total fiscal da encomenda é inválido.'
+    );
+  }
+
+  /*
+   * A fotografia fiscal e o total da encomenda são
+   * atualizados no mesmo batch.
+   */
+
+  updateStatements.push(
+    env.DB.prepare(`
+      UPDATE orders
+      SET
+        total_cents = ?,
+        receipt_status = CASE
+          WHEN receipt_status = 'not_required'
+          THEN 'pending'
+          ELSE receipt_status
+        END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(
+      totals.grossTotalCents,
+      orderId
+    )
+  );
+
+  await env.DB.batch(
+    updateStatements
+  );
+
+  return {
+    orderId: Number(orderId),
+    lines: frozenLines,
+
+    netTotalCents:
+      totals.netTotalCents,
+
+    vatTotalCents:
+      totals.vatTotalCents,
+
+    grossTotalCents:
+      totals.grossTotalCents,
+
+    vatBreakdown:
+      totals.vatBreakdown
+  };
+}
 const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
