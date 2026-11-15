@@ -1112,14 +1112,541 @@ function drawPdfRightText(
     }
   );
 }
-
-
 /* =========================================================
    GERAR PDF DO RECIBO
    ========================================================= */
 
-async function generateReceiptPdf
-  const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
+async function generateReceiptPdf({
+  order,
+  fiscalSnapshot,
+  receiptNumber,
+  preview = false
+}) {
+  const pdfDocument = await PDFDocument.create();
+
+  pdfDocument.setTitle(
+    `Recibo ${receiptNumber}`
+  );
+
+  pdfDocument.setAuthor(
+    'Dos Lilinhos'
+  );
+
+  pdfDocument.setSubject(
+    preview
+      ? 'Pré-visualização de recibo'
+      : 'Comprovativo de pagamento'
+  );
+
+  const regular = await pdfDocument.embedFont(
+    StandardFonts.Helvetica
+  );
+
+  const bold = await pdfDocument.embedFont(
+    StandardFonts.HelveticaBold
+  );
+
+  const page = pdfDocument.addPage([
+    595.28,
+    841.89
+  ]);
+
+  const pageWidth = page.getWidth();
+  const margin = 46;
+
+  const green = pdfColor('#315F37');
+  const coral = pdfColor('#ED4D5A');
+  const soft = pdfColor('#F6F6F4');
+  const lineColor = pdfColor('#DCE2DA');
+  const text = pdfColor('#343434');
+  const muted = pdfColor('#68736B');
+  const white = pdfColor('#FFFFFF');
+
+  let y = 790;
+
+  drawPdfText(
+    page,
+    'DOS LILINHOS',
+    {
+      x: margin,
+      y,
+      size: 20,
+      font: bold,
+      color: green
+    }
+  );
+
+  drawPdfRightText(
+    page,
+    preview
+      ? 'MAQUETE DE RECIBO'
+      : 'RECIBO',
+    {
+      right: pageWidth - margin,
+      y,
+      size: 16,
+      font: bold,
+      color: green
+    }
+  );
+
+  y -= 20;
+
+  drawPdfText(
+    page,
+    'Produção familiar, sazonal e transparente',
+    {
+      x: margin,
+      y,
+      size: 8,
+      font: regular,
+      color: muted
+    }
+  );
+
+  page.drawRectangle({
+    x: margin,
+    y: y - 18,
+    width: pageWidth - margin * 2,
+    height: 4,
+    color: green
+  });
+
+  y -= 48;
+
+  page.drawRectangle({
+    x: margin,
+    y: y - 42,
+    width: pageWidth - margin * 2,
+    height: 48,
+    color: soft
+  });
+
+  page.drawRectangle({
+    x: margin,
+    y: y - 42,
+    width: 5,
+    height: 48,
+    color: coral
+  });
+
+  drawPdfText(
+    page,
+    preview
+      ? 'PRÉ-VISUALIZAÇÃO TÉCNICA'
+      : 'DOCUMENTO NÃO FISCAL',
+    {
+      x: margin + 15,
+      y: y - 9,
+      size: 9,
+      font: bold,
+      color: text
+    }
+  );
+
+  drawPdfText(
+    page,
+    preview
+      ? 'Documento criado apenas para validar o desenho e os cálculos.'
+      : 'Comprovativo de pagamento. A fatura fiscal será emitida separadamente.',
+    {
+      x: margin + 15,
+      y: y - 27,
+      size: 8,
+      font: regular,
+      color: muted
+    }
+  );
+
+  y -= 72;
+
+  drawPdfText(
+    page,
+    `Documento: ${receiptNumber}`,
+    {
+      x: margin,
+      y,
+      size: 10,
+      font: bold,
+      color: text
+    }
+  );
+
+  drawPdfText(
+    page,
+    `Encomenda: ${order.order_number}`,
+    {
+      x: margin,
+      y: y - 18,
+      size: 9,
+      font: regular,
+      color: text
+    }
+  );
+
+  drawPdfText(
+    page,
+    `Data: ${pdfDate(
+      order.paid_at ||
+      order.created_at ||
+      new Date().toISOString()
+    )}`,
+    {
+      x: margin,
+      y: y - 35,
+      size: 9,
+      font: regular,
+      color: text
+    }
+  );
+
+  drawPdfRightText(
+    page,
+    preview
+      ? 'Estado: pré-visualização'
+      : 'Estado: pagamento confirmado',
+    {
+      right: pageWidth - margin,
+      y: y - 18,
+      size: 9,
+      font: bold,
+      color: green
+    }
+  );
+
+  y -= 70;
+
+  drawPdfText(
+    page,
+    'DADOS DO CLIENTE',
+    {
+      x: margin,
+      y,
+      size: 8,
+      font: bold,
+      color: green
+    }
+  );
+
+  y -= 15;
+
+  page.drawRectangle({
+    x: margin,
+    y: y - 43,
+    width: pageWidth - margin * 2,
+    height: 48,
+    color: soft,
+    borderColor: lineColor,
+    borderWidth: 1
+  });
+
+  drawPdfText(
+    page,
+    order.name || 'Cliente',
+    {
+      x: margin + 12,
+      y: y - 13,
+      size: 10,
+      font: bold,
+      color: text
+    }
+  );
+
+  drawPdfText(
+    page,
+    order.email || '',
+    {
+      x: margin + 12,
+      y: y - 29,
+      size: 8,
+      font: regular,
+      color: muted
+    }
+  );
+
+  y -= 72;
+
+  drawPdfText(
+    page,
+    'PRODUTOS E SERVIÇOS',
+    {
+      x: margin,
+      y,
+      size: 8,
+      font: bold,
+      color: green
+    }
+  );
+
+  y -= 16;
+
+  page.drawRectangle({
+    x: margin,
+    y: y - 23,
+    width: pageWidth - margin * 2,
+    height: 25,
+    color: green
+  });
+
+  drawPdfText(
+    page,
+    'Produto',
+    {
+      x: margin + 10,
+      y: y - 14,
+      size: 7.5,
+      font: bold,
+      color: white
+    }
+  );
+
+  drawPdfText(
+    page,
+    'Qtd.',
+    {
+      x: 345,
+      y: y - 14,
+      size: 7.5,
+      font: bold,
+      color: white
+    }
+  );
+
+  drawPdfText(
+    page,
+    'IVA',
+    {
+      x: 395,
+      y: y - 14,
+      size: 7.5,
+      font: bold,
+      color: white
+    }
+  );
+
+  drawPdfRightText(
+    page,
+    'Total',
+    {
+      right: pageWidth - margin - 10,
+      y: y - 14,
+      size: 7.5,
+      font: bold,
+      color: white
+    }
+  );
+
+  y -= 28;
+
+  for (const line of fiscalSnapshot.lines) {
+    page.drawLine({
+      start: {
+        x: margin,
+        y: y - 23
+      },
+      end: {
+        x: pageWidth - margin,
+        y: y - 23
+      },
+      thickness: 0.5,
+      color: lineColor
+    });
+
+    drawPdfText(
+      page,
+      truncatePdfText(
+        line.productName,
+        48
+      ),
+      {
+        x: margin + 10,
+        y: y - 12,
+        size: 8.5,
+        font: bold,
+        color: text
+      }
+    );
+
+    drawPdfText(
+      page,
+      String(line.quantity),
+      {
+        x: 350,
+        y: y - 12,
+        size: 8.5,
+        font: regular,
+        color: text
+      }
+    );
+
+    drawPdfText(
+      page,
+      vatRateLabel(line.vatRateBps),
+      {
+        x: 392,
+        y: y - 12,
+        size: 8.5,
+        font: regular,
+        color: text
+      }
+    );
+
+    drawPdfRightText(
+      page,
+      pdfMoney(line.lineGrossCents),
+      {
+        right: pageWidth - margin - 10,
+        y: y - 12,
+        size: 8.5,
+        font: bold,
+        color: text
+      }
+    );
+
+    y -= 30;
+  }
+
+  y -= 15;
+
+  const totalsX = 325;
+  const totalsRight = pageWidth - margin;
+
+  drawPdfText(
+    page,
+    'Subtotal sem IVA',
+    {
+      x: totalsX,
+      y,
+      size: 8.5,
+      font: regular,
+      color: muted
+    }
+  );
+
+  drawPdfRightText(
+    page,
+    pdfMoney(
+      fiscalSnapshot.netTotalCents
+    ),
+    {
+      right: totalsRight,
+      y,
+      size: 8.5,
+      font: bold,
+      color: text
+    }
+  );
+
+  y -= 17;
+
+  for (
+    const item of fiscalSnapshot.vatBreakdown
+  ) {
+    drawPdfText(
+      page,
+      `IVA a ${vatRateLabel(
+        item.vatRateBps
+      )}`,
+      {
+        x: totalsX,
+        y,
+        size: 8.5,
+        font: regular,
+        color: muted
+      }
+    );
+
+    drawPdfRightText(
+      page,
+      pdfMoney(item.vatCents),
+      {
+        right: totalsRight,
+        y,
+        size: 8.5,
+        font: bold,
+        color: text
+      }
+    );
+
+    y -= 17;
+  }
+
+  page.drawRectangle({
+    x: totalsX - 10,
+    y: y - 28,
+    width: totalsRight - totalsX + 10,
+    height: 35,
+    color: green
+  });
+
+  drawPdfText(
+    page,
+    'TOTAL',
+    {
+      x: totalsX,
+      y: y - 16,
+      size: 9,
+      font: bold,
+      color: white
+    }
+  );
+
+  drawPdfRightText(
+    page,
+    pdfMoney(
+      fiscalSnapshot.grossTotalCents
+    ),
+    {
+      right: totalsRight - 10,
+      y: y - 18,
+      size: 13,
+      font: bold,
+      color: white
+    }
+  );
+
+  const footerY = 48;
+
+  page.drawLine({
+    start: {
+      x: margin,
+      y: footerY + 23
+    },
+    end: {
+      x: pageWidth - margin,
+      y: footerY + 23
+    },
+    thickness: 2,
+    color: green
+  });
+
+  drawPdfText(
+    page,
+    'Dos Lilinhos',
+    {
+      x: margin,
+      y: footerY + 7,
+      size: 8,
+      font: bold,
+      color: green
+    }
+  );
+
+  drawPdfText(
+    page,
+    'encomendas@doslilinhos.pt | +351 964 086 053 | doslilinhos.pt',
+    {
+      x: margin,
+      y: footerY - 7,
+      size: 7,
+      font: regular,
+      color: muted
+    }
+  );
+
+  return pdfDocument.save();
+}
+const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
 if(p==='/api/admin/audit'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const entity=u.searchParams.get('entity')||'',result=u.searchParams.get('result')||'',where=[],bind=[];if(entity){where.push('entity_type=?');bind.push(entity)}if(result){where.push('result=?');bind.push(result)}const q=await e.DB.prepare(`SELECT * FROM audit_log ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY created_at DESC LIMIT 500`).bind(...bind).all();return out({events:q.results})}
