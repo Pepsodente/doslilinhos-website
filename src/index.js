@@ -2601,14 +2601,15 @@ if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await v
      * usa "Pagamento online" sem impedir o recibo.
      */
     const paymentDetails =
-      await getStripePaymentDetails(
-        e,
-        session
-      );
+  await getStripePaymentDetails(
+    e,
+    session
+  );
 
-    const paymentReference =
-      session.payment_intent ||
-      session.id;
+const paymentReference =
+  paymentDetails.reference ||
+  session.payment_intent ||
+  session.id;
 
     const paidAt =
       paidOrder.paid_at
