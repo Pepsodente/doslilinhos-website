@@ -2224,6 +2224,223 @@ function receiptPaymentLabel(
 }
 
 const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
+/* =========================================================
+   DADOS DO PAGAMENTO STRIPE
+   ========================================================= */
+
+async function getStripePaymentDetails(
+  env,
+  checkoutSession
+) {
+  const details = {
+    method: 'online',
+    brand: null,
+    last4: null,
+    methodLabel: 'Pagamento online',
+    provider: 'Stripe',
+    reference:
+      checkoutSession.payment_intent ||
+      checkoutSession.id ||
+      null
+  };
+
+  const paymentIntentId =
+    checkoutSession.payment_intent;
+
+  if (!paymentIntentId) {
+    return details;
+  }
+
+  try {
+    const paymentIntent =
+      await stripeGet(
+        env,
+        `payment_intents/${encodeURIComponent(
+          paymentIntentId
+        )}?expand[]=payment_method`
+      );
+
+    let paymentMethod =
+      paymentIntent.payment_method;
+
+    /*
+     * Se a Stripe devolver apenas o identificador,
+     * consulta o PaymentMethod separadamente.
+     */
+    if (
+      typeof paymentMethod === 'string' &&
+      paymentMethod
+    ) {
+      paymentMethod =
+        await stripeGet(
+          env,
+          `payment_methods/${encodeURIComponent(
+            paymentMethod
+          )}`
+        );
+    }
+
+    if (
+      !paymentMethod ||
+      typeof paymentMethod !== 'object'
+    ) {
+      return details;
+    }
+
+    const methodType =
+      String(
+        paymentMethod.type || 'online'
+      ).toLowerCase();
+
+    details.method = methodType;
+
+    if (
+      methodType === 'card' &&
+      paymentMethod.card
+    ) {
+      details.brand =
+        paymentMethod.card.brand || null;
+
+      details.last4 =
+        paymentMethod.card.last4 || null;
+
+      const brandLabels = {
+        visa: 'Visa',
+        mastercard: 'Mastercard',
+        amex: 'American Express',
+        discover: 'Discover',
+        diners: 'Diners Club',
+        jcb: 'JCB',
+        unionpay: 'UnionPay'
+      };
+
+      const brandLabel =
+        brandLabels[
+          String(
+            details.brand || ''
+          ).toLowerCase()
+        ] ||
+        details.brand ||
+        'Cartão';
+
+      details.methodLabel =
+        details.last4
+          ? `${brandLabel} •••• ${details.last4}`
+          : brandLabel;
+    } else if (
+      methodType === 'mb_way' ||
+      methodType === 'mbway'
+    ) {
+      details.method = 'mb_way';
+      details.methodLabel = 'MB WAY';
+    } else if (
+      methodType === 'multibanco'
+    ) {
+      details.methodLabel = 'Multibanco';
+    } else if (
+      methodType === 'sepa_debit'
+    ) {
+      details.methodLabel =
+        'Débito direto SEPA';
+    } else {
+      details.methodLabel =
+        paymentMethod.type
+          ? String(paymentMethod.type)
+          : 'Pagamento online';
+    }
+
+    return details;
+  } catch (error) {
+    /*
+     * A confirmação do pagamento não deve falhar
+     * apenas por não conseguirmos identificar
+     * a marca ou os últimos quatro dígitos.
+     */
+    console.error(
+      'Não foi possível obter os detalhes do pagamento Stripe:',
+      error
+    );
+
+    return details;
+  }
+}
+
+function parseReceiptSnapshot(
+  receipt
+) {
+  if (!receipt) {
+    throw new Error(
+      'Recibo não encontrado.'
+    );
+  }
+
+  try {
+    return {
+      customerSnapshot:
+        JSON.parse(
+          receipt.customer_snapshot_json ||
+          '{}'
+        ),
+
+      orderSnapshot:
+        JSON.parse(
+          receipt.order_snapshot_json ||
+          '{}'
+        ),
+
+      vatBreakdown:
+        JSON.parse(
+          receipt.vat_breakdown_json ||
+          '[]'
+        )
+    };
+  } catch (error) {
+    throw new Error(
+      'Os dados guardados do recibo são inválidos.'
+    );
+  }
+}
+
+function receiptToFiscalSnapshot(
+  receipt
+) {
+  const snapshots =
+    parseReceiptSnapshot(receipt);
+
+  const orderSnapshot =
+    snapshots.orderSnapshot;
+
+  return {
+    lines:
+      Array.isArray(
+        orderSnapshot.lines
+      )
+        ? orderSnapshot.lines
+        : [],
+
+    netTotalCents:
+      Number(
+        receipt.net_total_cents
+      ),
+
+    vatTotalCents:
+      Number(
+        receipt.vat_total_cents
+      ),
+
+    grossTotalCents:
+      Number(
+        receipt.gross_total_cents
+      ),
+
+    vatBreakdown:
+      Array.isArray(
+        snapshots.vatBreakdown
+      )
+        ? snapshots.vatBreakdown
+        : []
+  };
+}
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
 if(p==='/api/admin/audit'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const entity=u.searchParams.get('entity')||'',result=u.searchParams.get('result')||'',where=[],bind=[];if(entity){where.push('entity_type=?');bind.push(entity)}if(result){where.push('result=?');bind.push(result)}const q=await e.DB.prepare(`SELECT * FROM audit_log ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY created_at DESC LIMIT 500`).bind(...bind).all();return out({events:q.results})}
