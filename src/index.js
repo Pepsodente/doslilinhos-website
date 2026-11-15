@@ -1661,121 +1661,122 @@ y -= 20;
       color: white
     }
   );
-   /*
+    /*
    * SECÇÃO DO PAGAMENTO
    */
 
   y -= 55;
 
   drawPdfText(
-    *age,
+    page,
     'PAGAMENTO',
     {
-      *: margin,
+      x: margin,
       y,
       size: 8,
-*     font: bold,
-      color: gree*
+      font: bold,
+      color: green
     }
   );
 
   y -= 15;
 
-  page.dr*wRectangle({
+  page.drawRectangle({
     x: margin,
-    y:*y - 62,
-    width: pageWidth - mar*in * 2,
+    y: y - 62,
+    width: pageWidth - margin * 2,
     height: 67,
-    color:*soft,
+    color: soft,
     borderColor: lineColor,
-*   borderWidth: 1
+    borderWidth: 1
   });
 
-  const p*ymentMethod =
+  const paymentMethod =
     preview
-      ? *Simulação técnica, sem pagamento'
-*     : (
-          paymentDetails?*methodLabel ||
-          order.pay*ent_method ||
-          'Pagamento*online'
-        );
-
-  const paymen*Provider =
-    preview
-      ? 'Nã* aplicável'
+      ? 'Simulação técnica, sem pagamento'
       : (
-          pa*mentDetails?.provider ||
-         *order.payment_provider ||
-        * 'Stripe'
+          paymentDetails?.methodLabel ||
+          order.payment_method ||
+          'Pagamento online'
         );
 
-  const paym*ntDate =
+  const paymentProvider =
     preview
-      ? 'Sem *agamento real'
-      : pdfDate(
-  *       paymentDetails?.paidAt ||
- *        order.paid_at
+      ? 'Não aplicável'
+      : (
+          paymentDetails?.provider ||
+          order.payment_provider ||
+          'Stripe'
         );
 
-* const paymentReference =
-    prev*ew
-      ? 'Sem referência de paga*ento'
-      : abbreviatedPaymentRe*erence(
-          paymentDetails?.*eference ||
-          order.paymen*_reference ||
+  const paymentDate =
+    preview
+      ? 'Sem pagamento real'
+      : pdfDate(
+          paymentDetails?.paidAt ||
+          order.paid_at
+        );
+
+  const paymentReference =
+    preview
+      ? 'Sem referência de pagamento'
+      : abbreviatedPaymentReference(
+          paymentDetails?.reference ||
+          order.payment_reference ||
           ''
-       *);
+        );
 
   drawPdfText(
     page,
-    '*ORMA DE PAGAMENTO',
+    'FORMA DE PAGAMENTO',
     {
-      x:*margin + 12,
+      x: margin + 12,
       y: y - 13,
-    * size: 6.8,
+      size: 6.8,
       font: bold,
-    * color: green
+      color: green
     }
   );
 
-  drawPd*Text(
+  drawPdfText(
     page,
-    paymentMethod,*    {
+    paymentMethod,
+    {
       x: margin + 12,
-      *: y - 27,
+      y: y - 27,
       size: 9,
-      fon*: bold,
+      font: bold,
       color: text
     }
-  *;
+  );
 
   drawPdfText(
     page,
-    'D*TA E HORA DO PAGAMENTO',
+    'DATA E HORA DO PAGAMENTO',
     {
-   *  x: 310,
+      x: 310,
       y: y - 13,
-      s*ze: 6.8,
+      size: 6.8,
       font: bold,
-      c*lor: green
+      color: green
     }
   );
 
-  drawPdfTe*t(
+  drawPdfText(
     page,
     paymentDate,
-    *
+    {
       x: 310,
       y: y - 27,
-  *   size: 9,
+      size: 9,
       font: bold,
-    * color: text
+      color: text
     }
   );
 
-  drawPdf*ext(
+  drawPdfText(
     page,
-    `Prestador: ${p*ymentProvider}`,
+    `Prestador: ${paymentProvider}`,
     {
       x: margin + 12,
       y: y - 48,
