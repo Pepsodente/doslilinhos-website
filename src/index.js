@@ -1132,38 +1132,91 @@ async function generateReceiptPdf({
    * Confirma que este caminho corresponde ao nome real
    * do ficheiro existente no repositório.
    */
-  let logoImage = null;
+  let logoImage;
 
   try {
-    const logoUrl =
-      `${env.SITE_URL}/logo-dos-lilinhos.png`;
-
-    const logoResponse = await fetch(
-      logoUrl,
+    /*
+     * O hostname é apenas uma base sintética.
+     * O binding ASSETS utiliza o caminho pedido:
+     * /logo-dos-lilinhos.png
+     */
+    const logoRequest = new Request(
+      'https://assets.local/logo-dos-lilinhos.png',
       {
+        method: 'GET',
         headers: {
-          accept: 'image/png'
+          Accept: 'image/png,image/jpeg'
         }
       }
     );
 
+    const logoResponse =
+      await env.ASSETS.fetch(logoRequest);
+
     if (!logoResponse.ok) {
       throw new Error(
-        `O símbolo devolveu HTTP ${logoResponse.status}.`
+        `Ficheiro public/logo-dos-lilinhos.png não encontrado. HTTP ${logoResponse.status}.`
       );
     }
 
-    const logoBytes =
-      await logoResponse.arrayBuffer();
+    const logoBytes = new Uint8Array(
+      await logoResponse.arrayBuffer()
+    );
 
-    logoImage =
-      await pdfDocument.embedPng(
-        logoBytes
+    if (logoBytes.length < 8) {
+      throw new Error(
+        `O ficheiro do símbolo está vazio ou incompleto: ${logoBytes.length} bytes.`
       );
+    }
+
+    const isPng =
+      logoBytes[0] === 137 &&
+      logoBytes[1] === 80 &&
+      logoBytes[2] === 78 &&
+      logoBytes[3] === 71 &&
+      logoBytes[4] === 13 &&
+      logoBytes[5] === 10 &&
+      logoBytes[6] === 26 &&
+      logoBytes[7] === 10;
+
+    const isJpeg =
+      logoBytes[0] === 255 &&
+      logoBytes[1] === 216 &&
+      logoBytes[2] === 255;
+
+    if (isPng) {
+      logoImage =
+        await pdfDocument.embedPng(
+          logoBytes
+        );
+    } else if (isJpeg) {
+      logoImage =
+        await pdfDocument.embedJpg(
+          logoBytes
+        );
+    } else {
+      const contentType =
+        logoResponse.headers.get(
+          'content-type'
+        ) || 'desconhecido';
+
+      throw new Error(
+        `O recurso não contém uma imagem PNG ou JPEG válida. Content-Type: ${contentType}.`
+      );
+    }
   } catch (error) {
+    const reason =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
     console.error(
-      'Não foi possível carregar o símbolo no recibo:',
-      error
+      'Erro ao incorporar o símbolo no recibo:',
+      reason
+    );
+
+    throw new Error(
+      `Não foi possível incorporar o símbolo Dos Lilinhos no PDF: ${reason}`
     );
   }
 
@@ -1207,33 +1260,28 @@ async function generateReceiptPdf({
 
   let y = 790;
 
-  if (logoImage) {
-    const logoDimensions =
-      logoImage.scaleToFit(
-        205,
-        92
-      );
-
-    page.drawImage(
-      logoImage,
-      {
-        x: margin,
-        y:
-          y -
-          logoDimensions.height +
-          24,
-        width:
-          logoDimensions.width,
-        height:
-          logoDimensions.height
-      }
+  const logoDimensions =
+    logoImage.scaleToFit(
+      205,
+      92
     );
-} else {
-    throw new Error(
-      'Não foi possível incorporar o símbolo Dos Lilinhos no PDF.'
-    );
-  }
 
+  page.drawImage(
+    logoImage,
+    {
+      x: margin,
+      y:
+        y -
+        logoDimensions.height +
+        24,
+
+      width:
+        logoDimensions.width,
+
+      height:
+        logoDimensions.height
+    }
+  );
   drawPdfRightText(
     page,
     preview
