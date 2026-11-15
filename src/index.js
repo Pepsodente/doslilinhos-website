@@ -1134,27 +1134,28 @@ async function generateReceiptPdf({
    */
   let logoImage = null;
 
-  tr* {
+  try {
     const logoUrl = new URL(
-  *   '/logo-dos-lilinhos.jpeg',
-    * env.SITE_URL
+      '/logo-dos-lilinhos.jpeg',
+      env.SITE_URL
     );
 
-    const lo*oResponse = await env.ASSETS.fetch*
+    const logoResponse = await env.ASSETS.fetch(
       new Request(logoUrl)
-    );*
-    if (logoResponse.ok) {
-      *onst logoBytes =
-        await log*Response.arrayBuffer();
+    );
 
-      log*Image =
-        await pdfDocument.*mbedJpg(
+    if (logoResponse.ok) {
+      const logoBytes =
+        await logoResponse.arrayBuffer();
+
+      logoImage =
+        await pdfDocument.embedJpg(
           logoBytes
-     *  );
+        );
     }
   } catch (error) {
-   *console.error(
-      'Não foi poss*vel carregar o emblema no recibo:'*
+    console.error(
+      'Não foi possível carregar o emblema no recibo:',
       error
     );
   }
@@ -1198,7 +1199,7 @@ async function generateReceiptPdf({
 
   let y = 790;
 
-   if (logoImage) {
+  if (logoImage) {
     const logoDimensions =
       logoImage.scaleToFit(
         145,
@@ -1213,28 +1214,22 @@ async function generateReceiptPdf({
           y -
           logoDimensions.height +
           15,
-
         width:
           logoDimensions.width,
-
         height:
           logoDimensions.height
       }
     );
   } else {
-    /*
-     * Fallback caso o ficheiro não seja encontrado.
-     * O recibo continua a ser gerado.
-     */
     drawPdfText(
       page,
-   *  'DOS LILINHOS',
+      'DOS LILINHOS',
       {
-        *: margin,
+        x: margin,
         y,
-        size:*20,
+        size: 20,
         font: bold,
-        co*or: green
+        color: green
       }
     );
   }
@@ -1252,21 +1247,19 @@ async function generateReceiptPdf({
       color: green
     }
   );
+y -= 20;
 
-  y -= 20;
-
-    dr*wPdfText(
+  drawPdfText(
     page,
-    'Produção *amiliar, sazonal e transparente',
-*   {
+    'Produção familiar, sazonal e transparente',
+    {
       x: margin,
-      y: y -*4,
+      y: y - 4,
       size: 8,
-      font: regu*ar,
+      font: regular,
       color: muted
     }
   );
-*
 
   page.drawRectangle({
     x: margin,
@@ -1668,107 +1661,87 @@ async function generateReceiptPdf({
       color: white
     }
   );
-  /*
-   * SECÇÃO DO *AGAMENTO
+   /*
+   * SECÇÃO DO PAGAMENTO
    */
 
   y -= 55;
 
-  draw*dfText(
-    page,
-    'PAGAMENTO',*    {
-      x: margin,
+  drawPdfText(
+    *age,
+    'PAGAMENTO',
+    {
+      *: margin,
       y,
-  *   size: 8,
+      size: 8,
+*     font: bold,
+      color: gree*
+    }
+  );
+
+  y -= 15;
+
+  page.dr*wRectangle({
+    x: margin,
+    y:*y - 62,
+    width: pageWidth - mar*in * 2,
+    height: 67,
+    color:*soft,
+    borderColor: lineColor,
+*   borderWidth: 1
+  });
+
+  const p*ymentMethod =
+    preview
+      ? *Simulação técnica, sem pagamento'
+*     : (
+          paymentDetails?*methodLabel ||
+          order.pay*ent_method ||
+          'Pagamento*online'
+        );
+
+  const paymen*Provider =
+    preview
+      ? 'Nã* aplicável'
+      : (
+          pa*mentDetails?.provider ||
+         *order.payment_provider ||
+        * 'Stripe'
+        );
+
+  const paym*ntDate =
+    preview
+      ? 'Sem *agamento real'
+      : pdfDate(
+  *       paymentDetails?.paidAt ||
+ *        order.paid_at
+        );
+
+* const paymentReference =
+    prev*ew
+      ? 'Sem referência de paga*ento'
+      : abbreviatedPaymentRe*erence(
+          paymentDetails?.*eference ||
+          order.paymen*_reference ||
+          ''
+       *);
+
+  drawPdfText(
+    page,
+    '*ORMA DE PAGAMENTO',
+    {
+      x:*margin + 12,
+      y: y - 13,
+    * size: 6.8,
       font: bold,
     * color: green
     }
   );
 
-  y -= 1*;
-
-  page.drawRectangle({
-    x: m*rgin,
-    y: y - 62,
-    width: pa*eWidth - margin * 2,
-    height: 6*,
-    color: soft,
-    borderColor* lineColor,
-    borderWidth: 1
-  }*;
-
-  const paymentMethod =
-    pre*iew
-      ? 'Simulação técnica, se* pagamento'
-      : (
-          pa*mentDetails?.methodLabel ||
-      *   order.payment_method ||
-       *  'Pagamento online'
-        );
-
- *const paymentProvider =
-    previe*
-      ? 'Não aplicável'
-      : (*          paymentDetails?.provider*||
-          order.payment_provide* ||
-          'Stripe'
-        );
-*  const paymentDate =
-    preview
-*     ? 'Sem pagamento real'
-      * pdfDate(
-          paymentDetails*.paidAt ||
-          order.paid_at*        );
-
-  const paymentReferen*e =
-    preview
-      ? 'Sem refer*ncia de pagamento'
-      : abbrevi*tedPaymentReference(
-          pay*entDetails?.reference ||
-         *order.payment_reference ||
-       *  ''
-        );
-
-  drawPdfText(
-  * page,
-    'FORMA DE PAGAMENTO',
- *  {
+  drawPd*Text(
+    page,
+    paymentMethod,*    {
       x: margin + 12,
-      y:*y - 13,
-      size: 6.8,
-      fon*: bold,
-      color: green
-    }
- *);
-
-  drawPdfText(
-    page,
-    p*ymentMethod,
-    {
-      x: margin*+ 12,
-      y: y - 27,
-      size:*9,
-      font: bold,
-      color: *ext
-    }
-  );
-
-  drawPdfText(
-   *page,
-    'DATA E HORA DO PAGAMENT*',
-    {
-      x: 310,
-      y: y * 13,
-      size: 6.8,
-      font: *old,
-      color: green
-    }
-  );*
-  drawPdfText(
-    page,
-    paym*ntDate,
-    {
-      x: 310,
       *: y - 27,
       size: 9,
       fon*: bold,
@@ -1778,23 +1751,48 @@ async function generateReceiptPdf({
 
   drawPdfText(
     page,
-    `P*estador: ${paymentProvider}`,
+    'D*TA E HORA DO PAGAMENTO',
+    {
+   *  x: 310,
+      y: y - 13,
+      s*ze: 6.8,
+      font: bold,
+      c*lor: green
+    }
+  );
+
+  drawPdfTe*t(
+    page,
+    paymentDate,
     *
+      x: 310,
+      y: y - 27,
+  *   size: 9,
+      font: bold,
+    * color: text
+    }
+  );
+
+  drawPdf*ext(
+    page,
+    `Prestador: ${p*ymentProvider}`,
+    {
       x: margin + 12,
-      y: y * 48,
+      y: y - 48,
       size: 7.7,
-      font: *egular,
+      font: regular,
       color: muted
     }
- *);
+  );
 
   drawPdfText(
     page,
-    `*eferência: ${paymentReference}`,
- *  {
+    `Referência: ${paymentReference}`,
+    {
       x: 310,
-      y: y - 48,*      size: 7.7,
-      font: regul*r,
+      y: y - 48,
+      size: 7.7,
+      font: regular,
       color: muted
     }
   );
@@ -2537,50 +2535,43 @@ if (
             : 'RECIBO-PENDENTE'
         );
 
-const pdfB*tes =
-  await generateReceiptPdf({*    env: e,
+  const pdfBytes =
+    await generateReceiptPdf({
+      env: e,
+      order,
+      fiscalSnapshot,
 
-    order,
+      receiptNumber:
+        previewNumber,
 
-    fisca*Snapshot,
+      paymentDetails:
+        technicalOrder
+          ? {
+              methodLabel:
+                'Simulação técnica, sem pagamento',
+              provider:
+                'Não aplicável',
+              paidAt:
+                null,
+              reference:
+                null
+            }
+          : {
+              methodLabel:
+                order.payment_method ||
+                'Pagamento online',
+              provider:
+                order.payment_provider ||
+                'Stripe',
+              paidAt:
+                order.paid_at,
+              reference:
+                order.payment_reference
+            },
 
-    receiptNumber:
-    * previewNumber,
-
-    paymentDetail*: technicalOrder
-      ? {
-       *  methodLabel:
-            'Simula*ão técnica, sem pagamento',
-
-     *    provider:
-            'Não apl*cável',
-
-          paidAt:
-       *    null,
-
-          reference:
-  *         null
-        }
-      : {
-*         methodLabel:
-            *rder.payment_method ||
-           *'Pagamento online',
-
-          pro*ider:
-            order.payment_pr*vider ||
-            'Stripe',
-
-  *       paidAt:
-            order.p*id_at,
-
-          reference:
-     *      order.payment_reference
-    *   },
-
-    preview:
-      technica*Order
-  });
-
+      preview:
+        technicalOrder
+    });
   return new Response(
     pdfBytes,
     {
