@@ -1159,26 +1159,6 @@ async function generateReceiptPdf({
       error
     );
   }
-
-    const logoResponse = await env.ASSETS.fetch(
-      new Request(logoUrl)
-    );
-
-    if (logoResponse.ok) {
-      const logoBytes =
-        await logoResponse.arrayBuffer();
-
-      logoImage =
-        await pdfDocument.embedJpg(
-          logoBytes
-        );
-    }
-  } catch (error) {
-    console.error(
-      'Não foi possível carregar o emblema no recibo:',
-      error
-    );
-  }
   pdfDocument.setTitle(
     `Recibo ${receiptNumber}`
   );
