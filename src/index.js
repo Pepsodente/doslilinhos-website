@@ -1879,6 +1879,350 @@ async function generateReceiptPdf({
 
   return pdfDocument.save();
 }
+/* =========================================================
+   NUMERAÇÃO E REGISTO DOS RECIBOS
+   ========================================================= */
+
+async function nextReceiptNumber(
+  env,
+  paidAt = new Date()
+) {
+  const date =
+    paidAt instanceof Date
+      ? paidAt
+      : new Date(paidAt);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(
+      'Data do pagamento inválida.'
+    );
+  }
+
+  const year = date.getUTCFullYear();
+
+  const sequence = await env.DB.prepare(`
+    INSERT INTO receipt_sequences (
+      receipt_year,
+      last_number,
+      updated_at
+    )
+    VALUES (
+      ?,
+      1,
+      CURRENT_TIMESTAMP
+    )
+
+    ON CONFLICT(receipt_year)
+    DO UPDATE SET
+      last_number =
+        receipt_sequences.last_number + 1,
+      updated_at =
+        CURRENT_TIMESTAMP
+
+    RETURNING last_number
+  `)
+    .bind(year)
+    .first();
+
+  const number = Number(
+    sequence?.last_number
+  );
+
+  if (
+    !Number.isInteger(number) ||
+    number < 1
+  ) {
+    throw new Error(
+      'Não foi possível atribuir o número do recibo.'
+    );
+  }
+
+  return formatReceiptNumber(
+    year,
+    number
+  );
+}
+
+async function getExistingReceipt(
+  env,
+  orderId
+) {
+  return env.DB.prepare(`
+    SELECT *
+    FROM payment_receipts
+    WHERE order_id = ?
+    LIMIT 1
+  `)
+    .bind(orderId)
+    .first();
+}
+
+async function createPaymentReceipt({
+  env,
+  order,
+  fiscalSnapshot,
+  paymentReference,
+  paymentMethod = 'online',
+  paymentBrand = null,
+  paymentLast4 = null,
+  paidAt = new Date()
+}) {
+  /*
+   * Idempotência:
+   * se o webhook for repetido, reutiliza o recibo existente.
+   */
+  const existingReceipt =
+    await getExistingReceipt(
+      env,
+      order.id
+    );
+
+  if (existingReceipt) {
+    return existingReceipt;
+  }
+
+  const paymentReferenceText =
+    String(paymentReference || '').trim();
+
+  if (!paymentReferenceText) {
+    throw new Error(
+      'A referência do pagamento é obrigatória.'
+    );
+  }
+
+  const paidDate =
+    paidAt instanceof Date
+      ? paidAt
+      : new Date(paidAt);
+
+  if (Number.isNaN(paidDate.getTime())) {
+    throw new Error(
+      'Data do pagamento inválida.'
+    );
+  }
+
+  const receiptNumber =
+    await nextReceiptNumber(
+      env,
+      paidDate
+    );
+
+  const customerSnapshot = {
+    id: Number(order.customer_id),
+    name: String(order.name || ''),
+    email: String(order.email || '')
+  };
+
+  const orderSnapshot = {
+    id: Number(order.id),
+    orderNumber:
+      String(order.order_number),
+
+    lines:
+      fiscalSnapshot.lines,
+
+    netTotalCents:
+      fiscalSnapshot.netTotalCents,
+
+    vatTotalCents:
+      fiscalSnapshot.vatTotalCents,
+
+    grossTotalCents:
+      fiscalSnapshot.grossTotalCents,
+
+    vatBreakdown:
+      fiscalSnapshot.vatBreakdown,
+
+    shipping: {
+      serviceCode:
+        order.shipping_service_code ||
+        null,
+
+      carrier:
+        order.shipping_carrier ||
+        null,
+
+      serviceName:
+        order.shipping_service_name ||
+        null,
+
+      netCents:
+        Number(
+          order.shipping_net_cents ||
+          0
+        ),
+
+      vatCents:
+        Number(
+          order.shipping_vat_cents ||
+          0
+        ),
+
+      grossCents:
+        Number(
+          order.shipping_gross_cents ||
+          0
+        ),
+
+      vatRateBps:
+        order.shipping_vat_rate_bps === null
+          ? null
+          : Number(
+              order.shipping_vat_rate_bps
+            )
+    }
+  };
+
+  const result = await env.DB.prepare(`
+    INSERT INTO payment_receipts (
+      order_id,
+      customer_id,
+      receipt_number,
+      payment_reference,
+      payment_method,
+      payment_brand,
+      payment_last4,
+      paid_at,
+      net_total_cents,
+      vat_total_cents,
+      gross_total_cents,
+      vat_breakdown_json,
+      customer_snapshot_json,
+      order_snapshot_json,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+  `)
+    .bind(
+      order.id,
+      order.customer_id,
+      receiptNumber,
+      paymentReferenceText,
+      paymentMethod,
+      paymentBrand,
+      paymentLast4,
+      paidDate.toISOString(),
+      fiscalSnapshot.netTotalCents,
+      fiscalSnapshot.vatTotalCents,
+      fiscalSnapshot.grossTotalCents,
+      JSON.stringify(
+        fiscalSnapshot.vatBreakdown
+      ),
+      JSON.stringify(
+        customerSnapshot
+      ),
+      JSON.stringify(
+        orderSnapshot
+      )
+    )
+    .run();
+
+  const receiptId = Number(
+    result.meta.last_row_id
+  );
+
+  await env.DB.prepare(`
+    UPDATE orders
+    SET
+      receipt_id = ?,
+      receipt_status = 'issued',
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `)
+    .bind(
+      receiptId,
+      order.id
+    )
+    .run();
+
+  const receipt =
+    await env.DB.prepare(`
+      SELECT *
+      FROM payment_receipts
+      WHERE id = ?
+    `)
+      .bind(receiptId)
+      .first();
+
+  if (!receipt) {
+    throw new Error(
+      'O recibo foi criado, mas não pôde ser recuperado.'
+    );
+  }
+
+  return receipt;
+}
+
+function receiptPaymentLabel(
+  receipt
+) {
+  const method = String(
+    receipt.payment_method || ''
+  ).toLowerCase();
+
+  const brand = String(
+    receipt.payment_brand || ''
+  ).trim();
+
+  const last4 = String(
+    receipt.payment_last4 || ''
+  ).trim();
+
+  if (
+    method === 'card' &&
+    brand &&
+    last4
+  ) {
+    const brandLabels = {
+      visa: 'Visa',
+      mastercard: 'Mastercard',
+      amex: 'American Express'
+    };
+
+    const brandLabel =
+      brandLabels[
+        brand.toLowerCase()
+      ] || brand;
+
+    return `${brandLabel} •••• ${last4}`;
+  }
+
+  if (
+    method === 'mb_way' ||
+    method === 'mbway'
+  ) {
+    return 'MB WAY';
+  }
+
+  if (method === 'multibanco') {
+    return 'Multibanco';
+  }
+
+  if (method === 'card') {
+    return 'Cartão';
+  }
+
+  return 'Pagamento online';
+}
+
 const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
