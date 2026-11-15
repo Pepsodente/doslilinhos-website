@@ -842,7 +842,284 @@ async function freezeOrderFiscalSnapshot(
       totals.vatBreakdown
   };
 }
-const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
+/* =========================================================
+   CARREGAR FOTOGRAFIA FISCAL
+   ========================================================= */
+
+async function loadFrozenFiscalSnapshot(
+  env,
+  orderId
+) {
+  const items = await getOrderFiscalItems(
+    env,
+    orderId
+  );
+
+  if (!items.length) {
+    throw new Error(
+      'A encomenda não contém linhas.'
+    );
+  }
+
+  const lines = items.map(item => {
+    if (
+      !item.product_code ||
+      !item.product_name_snapshot ||
+      item.vat_rate_bps === null ||
+      item.line_net_cents === null ||
+      item.line_vat_cents === null ||
+      item.line_gross_cents === null
+    ) {
+      throw new Error(
+        'A fotografia fiscal da encomenda está incompleta.'
+      );
+    }
+
+    return {
+      type: 'product',
+
+      productCode:
+        item.product_code,
+
+      productName:
+        item.product_name_snapshot,
+
+      vatCategory:
+        item.vat_category_snapshot,
+
+      quantity:
+        Number(item.packs),
+
+      unitsPerPack:
+        Number(item.units_per_pack),
+
+      quantityEggs:
+        Number(item.quantity_eggs || 0),
+
+      unitGrossCents:
+        Number(item.unit_gross_cents),
+
+      discountBps:
+        Number(item.discount_bps || 0),
+
+      lineNetCents:
+        Number(item.line_net_cents),
+
+      lineVatCents:
+        Number(item.line_vat_cents),
+
+      lineGrossCents:
+        Number(item.line_gross_cents),
+
+      vatRateBps:
+        Number(item.vat_rate_bps)
+    };
+  });
+
+  const shipping = await getOrderShipping(
+    env,
+    orderId
+  );
+
+  if (
+    Number(
+      shipping.shipping_gross_cents || 0
+    ) > 0
+  ) {
+    if (
+      shipping.shipping_net_cents === null ||
+      shipping.shipping_vat_cents === null ||
+      shipping.shipping_vat_rate_bps === null
+    ) {
+      throw new Error(
+        'A fotografia fiscal da entrega está incompleta.'
+      );
+    }
+
+    lines.push({
+      type: 'shipping',
+
+      productCode:
+        shipping.shipping_service_code ||
+        'DELIVERY-INDEPENDENT',
+
+      productName:
+        shipping.shipping_service_name ||
+        'Serviço autónomo de entrega',
+
+      carrier:
+        shipping.shipping_carrier || null,
+
+      vatCategory:
+        'independent_transport',
+
+      quantity: 1,
+
+      unitGrossCents:
+        Number(
+          shipping.shipping_gross_cents
+        ),
+
+      discountBps: 0,
+
+      lineNetCents:
+        Number(
+          shipping.shipping_net_cents
+        ),
+
+      lineVatCents:
+        Number(
+          shipping.shipping_vat_cents
+        ),
+
+      lineGrossCents:
+        Number(
+          shipping.shipping_gross_cents
+        ),
+
+      vatRateBps:
+        Number(
+          shipping.shipping_vat_rate_bps
+        )
+    });
+  }
+
+  const totals =
+    calculateFiscalTotals(lines);
+
+  return {
+    lines,
+    ...totals
+  };
+}
+
+
+/* =========================================================
+   UTILITÁRIOS VISUAIS DO PDF
+   ========================================================= */
+
+function pdfColor(hex) {
+  const clean = String(hex)
+    .replace('#', '');
+
+  const value = Number.parseInt(
+    clean,
+    16
+  );
+
+  return rgb(
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255
+  );
+}
+
+function pdfMoney(cents) {
+  return `${(
+    Number(cents || 0) / 100
+  ).toFixed(2).replace('.', ',')} EUR`;
+}
+
+function pdfDate(value) {
+  if (!value) {
+    return 'A definir';
+  }
+
+  const date = new Date(
+    String(value).includes('T')
+      ? value
+      : `${value.replace(' ', 'T')}Z`
+  );
+
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return safePdfText(value);
+  }
+
+  return new Intl.DateTimeFormat(
+    'pt-PT',
+    {
+      dateStyle: 'short',
+      timeStyle: 'short',
+      timeZone: 'Europe/Lisbon'
+    }
+  ).format(date);
+}
+
+function truncatePdfText(
+  value,
+  maximumLength = 52
+) {
+  const text = safePdfText(value);
+
+  if (
+    text.length <= maximumLength
+  ) {
+    return text;
+  }
+
+  return `${text.slice(
+    0,
+    maximumLength - 3
+  )}...`;
+}
+
+function drawPdfText(
+  page,
+  text,
+  options = {}
+) {
+  page.drawText(
+    safePdfText(text),
+    {
+      x: options.x || 0,
+      y: options.y || 0,
+      size: options.size || 10,
+      font: options.font,
+      color:
+        options.color ||
+        pdfColor('#343434'),
+      maxWidth:
+        options.maxWidth
+    }
+  );
+}
+
+function drawPdfRightText(
+  page,
+  text,
+  options = {}
+) {
+  const font = options.font;
+  const size = options.size || 10;
+  const value = safePdfText(text);
+
+  const width =
+    font.widthOfTextAtSize(
+      value,
+      size
+    );
+
+  drawPdfText(
+    page,
+    value,
+    {
+      ...options,
+      x:
+        Number(options.right || 0) -
+        width
+    }
+  );
+}
+
+
+/* =========================================================
+   GERAR PDF DO RECIBO
+   ========================================================= */
+
+async function generateReceiptPdf
+  const flowUrls=(e,id)=>({url:`${e.SITE_URL}/encomendas.html#pedido-${id}`,productsUrl:`${e.SITE_URL}/produtos.html`,adminUrl:`${e.SITE_URL}/admin.html`});
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if(orderId&&['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&session.payment_status==='paid'){const o=await orderDetails(e,orderId);if(o&&o.payment_status!=='paid'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='paid',approval_status='paid',invoice_status='pending',paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='paid',provider_payment_intent=?,paid_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.payment_intent||null,session.id),e.DB.prepare(`INSERT INTO workflow_events(entity_type,entity_id,event_type,from_status,to_status,note,actor) VALUES('order',?,'payment_received',?,'paid',?,'stripe')`).bind(orderId,o.payment_status||'pending',session.payment_intent||session.id)]);const data={...o,...flowUrls(e,orderId),totalCents:session.amount_total||o.total_cents};await Promise.allSettled([sendEmail(e,e.DB,{type:'payment_received',to:o.email,data,customerId:o.customer_id,orderId}),sendEmail(e,e.DB,{type:'payment_received',to:e.ADMIN_EMAIL,data:{...data,name:'Administração'},customerId:o.customer_id,orderId})]);await audit(e.DB,{entityType:'payment',entityId:orderId,reference:o.order_number,action:'payment_received',fromStatus:o.payment_status||'pending',toStatus:'paid',actor:'stripe',amountCents:session.amount_total||o.total_cents,providerReference:session.payment_intent||session.id,webhookEventId:event.id})}}else if(orderId&&event.type==='checkout.session.expired'){const o=await orderDetails(e,orderId);if(o&&o.payment_status==='pending'){await e.DB.batch([e.DB.prepare(`UPDATE orders SET payment_status='expired',approval_status='payment_expired',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(orderId),e.DB.prepare(`UPDATE payments SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE provider_session_id=?`).bind(session.id)]);await sendEmail(e,e.DB,{type:'payment_expired',to:o.email,data:{...o,...flowUrls(e,orderId)},customerId:o.customer_id,orderId})}}else if(orderId&&['refund.created','refund.updated','refund.failed'].includes(event.type)){const refund=session,status=event.type==='refund.failed'?'failed':refund.status==='succeeded'?'succeeded':'pending',o=await orderDetails(e,orderId);if(o){await e.DB.prepare(`UPDATE orders SET refund_status=?,payment_status=?,refund_reference=?,refunded_at=CASE WHEN ?='succeeded' THEN CURRENT_TIMESTAMP ELSE refunded_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(status,status==='succeeded'?'refunded':status==='failed'?'refund_failed':'refund_pending',refund.id,status,orderId).run();await audit(e.DB,{entityType:'refund',entityId:orderId,reference:o.order_number,action:`refund_${status}`,fromStatus:o.refund_status,toStatus:status,actor:'stripe',amountCents:refund.amount,providerReference:refund.id,webhookEventId:event.id,result:status==='failed'?'failed':'success'});await sendEmail(e,e.DB,{type:status==='succeeded'?'refund_completed':status==='failed'?'refund_failed':'issue_reported',to:o.email,customerId:o.customer_id,orderId,data:{...o,...flowUrls(e,orderId),refundAmount:refund.amount,stateLabel:status==='succeeded'?'Reembolsada':'Reembolso em processamento'}})}}return out({received:true})}
 if(p==='/api/admin/audit'&&m==='GET'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const entity=u.searchParams.get('entity')||'',result=u.searchParams.get('result')||'',where=[],bind=[];if(entity){where.push('entity_type=?');bind.push(entity)}if(result){where.push('result=?');bind.push(result)}const q=await e.DB.prepare(`SELECT * FROM audit_log ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY created_at DESC LIMIT 500`).bind(...bind).all();return out({events:q.results})}
@@ -1445,6 +1722,132 @@ return out({
 });
 }
 wm=p.match(/^\/api\/admin\/subscriptions\/(\d+)\/(approve|reject)$/);if(wm&&m==='POST'){if(!adminOK(r,e))return out({error:'Não autorizado.'},401);const id=+wm[1],action=wm[2],b=await r.json(),x=await e.DB.prepare(`SELECT s.*,c.name,c.email,p.name product FROM subscriptions s JOIN customers c ON c.id=s.customer_id JOIN products p ON p.id=s.product_id WHERE s.id=?`).bind(id).first();if(!x)return out({error:'Subscrição não encontrada.'},404);const next=action==='approve'?'active':'rejected';await e.DB.prepare(`UPDATE subscriptions SET status=?,approval_note=?,price_cents=COALESCE(?,price_cents),first_delivery_on=COALESCE(?,first_delivery_on),pickup_location=COALESCE(?,pickup_location),approved_at=CASE WHEN ?='active' THEN CURRENT_TIMESTAMP ELSE approved_at END,rejected_at=CASE WHEN ?='rejected' THEN CURRENT_TIMESTAMP ELSE rejected_at END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,b.note||null,b.priceCents||null,b.firstDelivery||null,b.location||null,next,next,id).run();await sendEmail(e,e.DB,{type:action==='approve'?'subscription_approved':'subscription_rejected',to:x.email,customerId:x.customer_id,subscriptionId:id,data:{...x,note:b.note,quantity:`${x.eggs_per_delivery} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[x.frequency]||x.frequency,priceCents:b.priceCents||0,firstDelivery:b.firstDelivery,url:`${e.SITE_URL}/subscricoes.html`,productsUrl:`${e.SITE_URL}/produtos.html`}});return out({success:true,status:next})}
+/* =========================================================
+   PRÉ-VISUALIZAÇÃO DO RECIBO
+   Não cria recibo, não marca pagamento e não envia email.
+   ========================================================= */
+
+const receiptPreviewMatch =
+  p.match(
+    /^\/api\/my\/orders\/(\d+)\/receipt-preview\.pdf$/
+  );
+
+if (
+  receiptPreviewMatch &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const orderId = Number(
+    receiptPreviewMatch[1]
+  );
+
+  const order =
+    await e.DB.prepare(`
+      SELECT
+        o.*,
+        c.name,
+        c.email
+      FROM orders o
+      JOIN customers c
+        ON c.id = o.customer_id
+      WHERE o.id = ?
+        AND o.customer_id = ?
+    `)
+      .bind(
+        orderId,
+        currentCustomer.id
+      )
+      .first();
+
+  if (!order) {
+    return out(
+      {
+        error:
+          'Encomenda não encontrada.'
+      },
+      404
+    );
+  }
+
+  /*
+   * Por segurança, a pré-visualização sem pagamento
+   * fica limitada às encomendas técnicas.
+   */
+  const technicalOrder =
+    String(
+      order.internal_notes || ''
+    ).startsWith('TESTE TÉCNICO');
+
+  if (
+    order.payment_status !== 'paid' &&
+    !technicalOrder
+  ) {
+    return out(
+      {
+        error:
+          'O recibo só fica disponível após o pagamento.'
+      },
+      409
+    );
+  }
+
+  const fiscalSnapshot =
+    await loadFrozenFiscalSnapshot(
+      e,
+      orderId
+    );
+
+  const previewNumber =
+    technicalOrder
+      ? 'MAQUETE-DL-RC-2026-000001'
+      : (
+          order.receipt_id
+            ? `RECIBO-${order.receipt_id}`
+            : 'RECIBO-PENDENTE'
+        );
+
+  const pdfBytes =
+    await generateReceiptPdf({
+      order,
+      fiscalSnapshot,
+      receiptNumber:
+        previewNumber,
+      preview:
+        technicalOrder
+    });
+
+  return new Response(
+    pdfBytes,
+    {
+      status: 200,
+
+      headers: {
+        'content-type':
+          'application/pdf',
+
+        'content-disposition':
+          `inline; filename="Dos-Lilinhos_Recibo_${previewNumber}.pdf"`,
+
+        'cache-control':
+          'private, no-store, max-age=0',
+
+        'x-content-type-options':
+          'nosniff'
+      }
+    }
+  );
+}
 if(p==='/api/stock'){const pr=await product(e);return out({success:true,stock:await stock(e,pr.id),product:pr})}if(p==='/api/auth/me'){const c=await customer(r,e);return out({success:true,authenticated:!!c,customer:c})}if(p==='/api/auth/register'&&m==='POST'){const b=await r.json(),name=String(b.name||'').trim(),username=String(b.username||'').trim().toLowerCase(),email=String(b.email||'').trim().toLowerCase(),pw=String(b.password||'');if(!/^[a-z0-9._-]{3,30}$/.test(username)||pw.length<8||pw!==b.passwordConfirmation||!b.privacyAccepted)return out({success:false,error:'Confirma todos os dados e as palavras-passe.'},400);if(await e.DB.prepare('SELECT id FROM customers WHERE email=? OR username=?').bind(email,username).first())return out({success:false,error:'Email ou nome de utilizador já existente.'},409);const q=await e.DB.prepare(`INSERT INTO customers(name,username,email,password_hash,notifications_enabled,privacy_accepted_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(name,username,email,await hashPass(pw),b.notificationsEnabled?1:0).run();return out({success:true},201,{'set-cookie':setcookie(await makeSession(q.meta.last_row_id,e))})}if(p==='/api/auth/recover'&&m==='POST'){const b=await r.json(),identifier=String(b.identifier||'').trim().toLowerCase(),generic={success:true,message:'Se encontrarmos uma conta correspondente, enviaremos um email com as instruções.'};if(!identifier)return out(generic);const ih=await sha(`recover:${identifier}`),recent=await e.DB.prepare(`SELECT COUNT(*) n FROM password_reset_rate_limits WHERE identifier_hash=? AND requested_at>datetime('now','-15 minutes')`).bind(ih).first();if(Number(recent?.n||0)>=3)return out(generic);await e.DB.prepare('INSERT INTO password_reset_rate_limits(identifier_hash) VALUES(?)').bind(ih).run();const c=await e.DB.prepare(`SELECT id,name,username,email FROM customers WHERE active=1 AND (lower(email)=? OR lower(username)=?)`).bind(identifier,identifier).first();if(c){await e.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE customer_id=? AND used_at IS NULL`).bind(c.id).run();const raw=b64(crypto.getRandomValues(new Uint8Array(32))).replace(/[+/=]/g,''),th=await sha(raw),ip=r.headers.get('cf-connecting-ip')||'',iph=ip?await sha(`reset-ip:${ip}`):null;await e.DB.prepare(`INSERT INTO password_reset_tokens(customer_id,token_hash,expires_at,requested_ip_hash) VALUES(?,?,datetime('now','+30 minutes'),?)`).bind(c.id,th,iph).run();await sendEmail(e,e.DB,{type:'access_recovery',to:c.email,customerId:c.id,data:{name:c.name,username:c.username,resetUrl:`${e.SITE_URL}/repor-password.html?token=${encodeURIComponent(raw)}`}})}return out(generic)}
 if(p==='/api/auth/reset/validate'&&m==='GET'){const raw=u.searchParams.get('token')||'';if(!raw)return out({valid:false});const x=await e.DB.prepare(`SELECT id FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at>datetime('now')`).bind(await sha(raw)).first();return out({valid:!!x})}
 if(p==='/api/auth/reset'&&m==='POST'){const b=await r.json(),raw=String(b.token||''),pw=String(b.password||''),confirm=String(b.passwordConfirmation||'');if(pw.length<8||pw!==confirm)return out({error:'As palavras-passe devem coincidir e ter pelo menos 8 caracteres.'},400);const x=await e.DB.prepare(`SELECT t.id,t.customer_id,c.name,c.email FROM password_reset_tokens t JOIN customers c ON c.id=t.customer_id WHERE t.token_hash=? AND t.used_at IS NULL AND t.expires_at>datetime('now')`).bind(await sha(raw)).first();if(!x)return out({error:'A ligação é inválida ou expirou.'},400);await e.DB.batch([e.DB.prepare('UPDATE customers SET password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(await hashPass(pw),x.customer_id),e.DB.prepare('UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?').bind(x.id),e.DB.prepare('DELETE FROM customer_sessions WHERE customer_id=?').bind(x.customer_id)]);await sendEmail(e,e.DB,{type:'password_changed',to:x.email,customerId:x.customer_id,data:{name:x.name,loginUrl:`${e.SITE_URL}/?login=1`}});return out({success:true})}
