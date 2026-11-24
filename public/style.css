@@ -382,6 +382,9 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
 }
 
 .order-document:last-child {
+  border-bottom: 0;
+}
+
 /* Referência ATGo / Portal das Finanças */
 
 .at-reference-preview {
