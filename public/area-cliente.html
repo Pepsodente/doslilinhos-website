@@ -1,7 +1,15 @@
 <!doctype html>
 <html lang="pt-PT">
 <head>
-  ...
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <title>Área de cliente | Dos Lilinhos</title>
+
   <link
     rel="stylesheet"
     href="/style.css?v=46"
@@ -10,21 +18,33 @@
 
 <body class="requires-auth customer-page">
   <header class="site-header">
-    ...
-  </header>
+    <a
+      class="brand-logo"
+      href="/"
+      aria-label="Dos Lilinhos, página inicial"
+    >
+      <img
+        src="/logo-dos-lilinhos.png"
+        alt="Dos Lilinhos"
+        width="190"
+        height="110"
+      >
 
-  <main class="customer-shell">
-    ...
-  </main>
+      <span class="brand-fallback">
+        <strong>Dos Lilinhos</strong>
+        <small>Produção familiar</small>
+      </span>
+    </a>
 
-  <footer class="site-footer">
-    ...
-  </footer>
+    <nav
+      class="main-nav"
+      aria-label="Navegação principal"
+    >
+      <a href="/">Início</a>
+      <a href="/produtos.html">Produtos</a>
+      <a href="/projeto.html">O projeto</a>
+    </nav>
 
-  <dialog id="authDialog">
-    ...
-  </dialog>
-
-  <script src="/app.js?v=46"></script>
-</body>
-</html>
+    <div class="account-area">
+      <button
+        id="avatarButton
