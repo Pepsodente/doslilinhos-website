@@ -408,3 +408,9 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
   cursor: not-allowed;
   opacity: 0.55;
 }
+/* Campos apenas da criação de conta */
+
+#authDialog .register-field[hidden],
+#authDialog [hidden] {
+  display: none !important;
+}
