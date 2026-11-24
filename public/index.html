@@ -12,7 +12,7 @@
 
   <link
     rel="stylesheet"
-    href="/style.css?v=40"
+    href="/style.css?v=41"
   >
 
   <style>
@@ -30,133 +30,120 @@
     }
   </style>
 </head>
-
 <body class="home-page">
-  <header class="site-header">
-    <a
-      class="brand-logo"
-      href="/"
-      aria-label="Dos Lilinhos, página inicial"
+ <header class="site-header">
+  <a
+    class="brand-logo"
+    href="/"
+    aria-label="Dos Lilinhos, página inicial"
+  >
+    <img
+      src="/logo-dos-lilinhos.png"
+      alt="Dos Lilinhos"
+      width="190"
+      height="110"
     >
-      <img
-        src="/logo-dos-lilinhos.png"
-        alt="Dos Lilinhos"
-        width="190"
-        height="110"
-      >
 
-      <span class="brand-fallback">
-        <strong>Dos Lilinhos</strong>
-        <small>Produção familiar</small>
+    <span class="brand-fallback">
+      <strong>Dos Lilinhos</strong>
+      <small>Produção familiar</small>
+    </span>
+  </a>
+
+  <nav
+    class="main-nav"
+    aria-label="Navegação principal"
+  >
+    <a href="/">Início</a>
+    <a href="/produtos.html">Produtos</a>
+    <a href="/projeto.html">O projeto</a>
+  </nav>
+
+  <div class="account-area">
+    <button
+      id="avatarButton"
+      class="avatar-button private"
+      type="button"
+      aria-label="Abrir área de cliente"
+      aria-expanded="false"
+      aria-controls="avatarMenu"
+    >
+      <span
+        class="person-icon"
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 24 24">
+          <circle
+            cx="12"
+            cy="8"
+            r="4"
+          ></circle>
+
+          <path
+            d="M4.5 21a7.5 7.5 0 0 1 15 0"
+          ></path>
+        </svg>
       </span>
-    </a>
+    </button>
 
-    <nav
-      class="main-nav"
-      aria-label="Navegação principal"
+    <div
+      id="avatarMenu"
+      class="avatar-menu private"
     >
-      <a href="/">Início</a>
-      <a href="/produtos.html">Produtos</a>
-      <a href="/projeto.html">O projeto</a>
-    </nav>
+      <strong id="menuName">Cliente</strong>
+      <small id="menuEmail"></small>
 
-    <div class="account-area">
-      <div class="account-access">
-        <button
-          id="avatarButton"
-          class="avatar-button private"
-          type="button"
-          aria-label="Abrir área de cliente"
-          aria-expanded="false"
-          aria-controls="avatarMenu"
-        >
-          <span
-            class="person-icon"
-            aria-hidden="true"
-          >
-            <svg viewBox="0 0 24 24">
-              <circle
-                cx="12"
-                cy="8"
-                r="4"
-              ></circle>
+      <a href="/area-cliente.html">
+        Área de cliente
+      </a>
 
-              <path
-                d="M4.5 21a7.5 7.5 0 0 1 15 0"
-              ></path>
-            </svg>
-          </span>
-        </button>
+      <a href="/encomendas.html">
+        As minhas encomendas
+      </a>
 
-        <div
-          id="guestAccessLinks"
-          class="guest-access-links public"
-          aria-label="Acesso à conta"
-        >
-          <button
-            type="button"
-            class="guest-access-button"
-            data-auth-dialog="register"
-          >
-            Criar conta
-          </button>
+      <a href="/subscricoes.html">
+        As minhas subscrições
+      </a>
 
-          <span aria-hidden="true">|</span>
-
-          <button
-            type="button"
-            class="guest-access-button"
-            data-auth-dialog="login"
-          >
-            Login
-          </button>
-        </div>
-      </div>
-
-      <div
-        id="avatarMenu"
-        class="avatar-menu private"
-      >
-        <strong id="menuName">
-          Cliente
-        </strong>
-
-        <small id="menuEmail"></small>
-
-        <a href="/area-cliente.html">
-          Área de cliente
-        </a>
-
-        <a href="/encomendas.html">
-          As minhas encomendas
-        </a>
-
-        <a href="/subscricoes.html">
-          As minhas subscrições
-        </a>
-
-        <a href="/perfil.html">
-          O meu perfil
-        </a>
-
-        <button
-          id="logoutButton"
-          type="button"
-        >
-          Terminar sessão
-        </button>
-      </div>
+      <a href="/perfil.html">
+        O meu perfil
+      </a>
 
       <button
-        id="menuButton"
-        class="menu-button"
+        id="logoutButton"
         type="button"
-        aria-label="Abrir menu"
       >
-        Menu
+        Terminar sessão
       </button>
     </div>
-  </header>
+
+    <div class="auth-actions public">
+      <button
+        type="button"
+        data-auth="login"
+      >
+        Entrar
+      </button>
+
+      <button
+        type="button"
+        class="solid"
+        data-auth="register"
+      >
+        Criar conta
+      </button>
+    </div>
+
+    <button
+      id="menuButton"
+      class="menu-button"
+      type="button"
+      aria-label="Abrir menu"
+    >
+      Menu
+    </button>
+  </div>
+</header>
 
   <main>
     <section class="hero">
@@ -552,10 +539,7 @@
     </div>
   </footer>
 
-  <dialog
-    id="loginDialog"
-    class="auth-dialog"
-  >
+  <dialog id="authDialog">
     <button
       class="close"
       type="button"
@@ -564,215 +548,138 @@
       ×
     </button>
 
-    <div class="auth-dialog-content">
-      <p class="eyebrow">
-        Área de cliente
-      </p>
+    <p class="eyebrow">
+      Área de cliente
+    </p>
 
-      <h2>Login</h2>
+    <h2 id="authTitle">
+      Entrar
+    </h2>
 
-      <p>
-        Entra para acompanhar encomendas,
-        pagamentos e documentos.
-      </p>
+    <form id="authForm">
+      <label class="register-field">
+        Nome completo
 
-      <form id="loginForm">
-        <label>
-          Email ou nome de utilizador
-
-          <input
-            name="identifier"
-            type="text"
-            autocomplete="username"
-            required
-          >
-        </label>
-
-        <label>
-          Palavra-passe
-
-          <input
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            minlength="8"
-            required
-          >
-        </label>
-
-        <button
-          class="button solid full"
-          type="submit"
+        <input
+          name="name"
+          type="text"
+          autocomplete="name"
         >
-          Entrar
-        </button>
+      </label>
 
-        <p
-          id="loginMessage"
-          class="form-message"
-          aria-live="polite"
-        ></p>
+      <label class="register-field">
+        Nome de utilizador
 
-        <a
-          id="recoverAccessLink"
-          href="/recuperar-acesso.html"
+        <input
+          name="username"
+          type="text"
+          autocomplete="username"
+          minlength="3"
+          maxlength="30"
+          pattern="[A-Za-z0-9._-]+"
+          placeholder="ex.: joaosilva"
         >
-          Esqueci o utilizador ou a palavra-passe
-        </a>
-      </form>
 
-      <div class="auth-switch-panel">
-        <span>Ainda não tens conta?</span>
+        <small class="field-help">
+          Sem espaços. Letras, números, ponto,
+          hífen ou sublinhado.
+        </small>
+      </label>
 
-        <button
-          type="button"
-          class="link-button"
-          data-switch-auth="register"
+      <label id="loginIdentifierLabel">
+        Email ou nome de utilizador
+
+        <input
+          id="authIdentifier"
+          name="identifier"
+          type="text"
+          autocomplete="username"
+          required
         >
-          Criar conta
-        </button>
-      </div>
-    </div>
-  </dialog>
+      </label>
 
-  <dialog
-    id="registerDialog"
-    class="auth-dialog"
-  >
+      <label class="register-field">
+        Email
+
+        <input
+          id="authEmail"
+          name="email"
+          type="email"
+          autocomplete="email"
+        >
+      </label>
+
+      <label>
+        Palavra-passe
+
+        <input
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          minlength="8"
+          required
+        >
+      </label>
+
+      <label class="register-field">
+        Repetir palavra-passe
+
+        <input
+          name="passwordConfirmation"
+          type="password"
+          autocomplete="new-password"
+          minlength="8"
+        >
+      </label>
+
+      <label class="check register-field">
+        <input
+          name="notificationsEnabled"
+          type="checkbox"
+        >
+
+        Receber avisos
+      </label>
+
+      <label class="check register-field">
+        <input
+          name="privacyAccepted"
+          type="checkbox"
+          required
+        >
+
+        Aceito a Política de Privacidade
+      </label>
+
+      <button
+        id="authSubmit"
+        class="button solid full"
+        type="submit"
+      >
+        Continuar
+      </button>
+
+      <p
+        id="authMessage"
+        class="form-message"
+        aria-live="polite"
+      ></p>
+
+      <a
+        id="recoverAccessLink"
+        href="/recuperar-acesso.html"
+      >
+        Esqueci o utilizador ou a palavra-passe
+      </a>
+    </form>
+
     <button
-      class="close"
+      id="authSwitch"
+      class="link-button"
       type="button"
-      aria-label="Fechar"
-    >
-      ×
-    </button>
-
-    <div class="auth-dialog-content">
-      <p class="eyebrow">
-        Novo cliente
-      </p>
-
-      <h2>Criar conta</h2>
-
-      <p>
-        Cria uma conta para reservar produtos
-        e acompanhar os pedidos.
-      </p>
-
-      <form id="registerForm">
-        <label>
-          Nome completo
-
-          <input
-            name="name"
-            type="text"
-            autocomplete="name"
-            required
-          >
-        </label>
-
-        <label>
-          Nome de utilizador
-
-          <input
-            name="username"
-            type="text"
-            autocomplete="username"
-            minlength="3"
-            maxlength="30"
-            pattern="[A-Za-z0-9._-]{3,30}"
-            placeholder="ex.: joaosilva"
-            required
-          >
-
-          <small class="field-help">
-            Sem espaços. Letras, números, ponto,
-            hífen ou sublinhado.
-          </small>
-        </label>
-
-        <label>
-          Email
-
-          <input
-            name="email"
-            type="email"
-            autocomplete="email"
-            required
-          >
-        </label>
-
-        <label>
-          Palavra-passe
-
-          <input
-            name="password"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            required
-          >
-        </label>
-
-        <label>
-          Repetir palavra-passe
-
-          <input
-            name="passwordConfirmation"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            required
-          >
-        </label>
-
-        <label class="check">
-          <input
-            name="notificationsEnabled"
-            type="checkbox"
-          >
-
-          Receber avisos
-        </label>
-
-        <label class="check">
-          <input
-            name="privacyAccepted"
-            type="checkbox"
-            required
-          >
-
-          Aceito a Política de Privacidade
-        </label>
-
-        <button
-          class="button solid full"
-          type="submit"
-        >
-          Criar conta
-        </button>
-
-        <p
-          id="registerMessage"
-          class="form-message"
-          aria-live="polite"
-        ></p>
-      </form>
-
-      <div class="auth-switch-panel">
-        <span>Já tens conta?</span>
-
-        <button
-          type="button"
-          class="link-button"
-          data-switch-auth="login"
-        >
-          Fazer login
-        </button>
-      </div>
-    </div>
+    ></button>
   </dialog>
 
-  <script src="/app.js?v=40"></script>
+  <script src="/app.js?v=41"></script>
 </body>
 </html>
