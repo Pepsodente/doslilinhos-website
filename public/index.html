@@ -539,146 +539,146 @@
     </div>
   </footer>
 
-  <dialog id="authDialog">
+<dialog id="authDialog">
+  <button
+    class="close"
+    type="button"
+    aria-label="Fechar"
+  >
+    ×
+  </button>
+
+  <p class="eyebrow">
+    Área de cliente
+  </p>
+
+  <h2 id="authTitle">
+    Entrar
+  </h2>
+
+  <form id="authForm">
+    <label class="register-field">
+      Nome completo
+
+      <input
+        name="name"
+        type="text"
+        autocomplete="name"
+      >
+    </label>
+
+    <label class="register-field">
+      Nome de utilizador
+
+      <input
+        name="username"
+        type="text"
+        autocomplete="username"
+        minlength="3"
+        maxlength="30"
+        pattern="[A-Za-z0-9._-]+"
+        placeholder="ex.: joaosilva"
+      >
+
+      <small class="field-help">
+        Sem espaços. Letras, números, ponto,
+        hífen ou sublinhado.
+      </small>
+    </label>
+
+    <label id="loginIdentifierLabel">
+      Email ou nome de utilizador
+
+      <input
+        id="authIdentifier"
+        name="identifier"
+        type="text"
+        autocomplete="username"
+        required
+      >
+    </label>
+
+    <label class="register-field">
+      Email
+
+      <input
+        id="authEmail"
+        name="email"
+        type="email"
+        autocomplete="email"
+      >
+    </label>
+
+    <label>
+      Palavra-passe
+
+      <input
+        name="password"
+        type="password"
+        autocomplete="current-password"
+        minlength="8"
+        required
+      >
+    </label>
+
+    <label class="register-field">
+      Repetir palavra-passe
+
+      <input
+        name="passwordConfirmation"
+        type="password"
+        autocomplete="new-password"
+        minlength="8"
+      >
+    </label>
+
+    <label class="check register-field">
+      <input
+        name="notificationsEnabled"
+        type="checkbox"
+      >
+
+      Receber avisos
+    </label>
+
+    <label class="check register-field">
+      <input
+        name="privacyAccepted"
+        type="checkbox"
+        required
+      >
+
+      Aceito a Política de Privacidade
+    </label>
+
     <button
-      class="close"
-      type="button"
-      aria-label="Fechar"
+      id="authSubmit"
+      class="button solid full"
+      type="submit"
     >
-      ×
+      Continuar
     </button>
 
-    <p class="eyebrow">
-      Área de cliente
-    </p>
+    <p
+      id="authMessage"
+      class="form-message"
+      aria-live="polite"
+    ></p>
 
-    <h2 id="authTitle">
-      Entrar
-    </h2>
+    <a
+      id="recoverAccessLink"
+      href="/recuperar-acesso.html"
+    >
+      Esqueci o utilizador ou a palavra-passe
+    </a>
+  </form>
 
-    <form id="authForm">
-      <label class="register-field">
-        Nome completo
-
-        <input
-          name="name"
-          type="text"
-          autocomplete="name"
-        >
-      </label>
-
-      <label class="register-field">
-        Nome de utilizador
-
-        <input
-          name="username"
-          type="text"
-          autocomplete="username"
-          minlength="3"
-          maxlength="30"
-          pattern="[A-Za-z0-9._-]+"
-          placeholder="ex.: joaosilva"
-        >
-
-        <small class="field-help">
-          Sem espaços. Letras, números, ponto,
-          hífen ou sublinhado.
-        </small>
-      </label>
-
-      <label id="loginIdentifierLabel">
-        Email ou nome de utilizador
-
-        <input
-          id="authIdentifier"
-          name="identifier"
-          type="text"
-          autocomplete="username"
-          required
-        >
-      </label>
-
-      <label class="register-field">
-        Email
-
-        <input
-          id="authEmail"
-          name="email"
-          type="email"
-          autocomplete="email"
-        >
-      </label>
-
-      <label>
-        Palavra-passe
-
-        <input
-          name="password"
-          type="password"
-          autocomplete="current-password"
-          minlength="8"
-          required
-        >
-      </label>
-
-      <label class="register-field">
-        Repetir palavra-passe
-
-        <input
-          name="passwordConfirmation"
-          type="password"
-          autocomplete="new-password"
-          minlength="8"
-        >
-      </label>
-
-      <label class="check register-field">
-        <input
-          name="notificationsEnabled"
-          type="checkbox"
-        >
-
-        Receber avisos
-      </label>
-
-      <label class="check register-field">
-        <input
-          name="privacyAccepted"
-          type="checkbox"
-          required
-        >
-
-        Aceito a Política de Privacidade
-      </label>
-
-      <button
-        id="authSubmit"
-        class="button solid full"
-        type="submit"
-      >
-        Continuar
-      </button>
-
-      <p
-        id="authMessage"
-        class="form-message"
-        aria-live="polite"
-      ></p>
-
-      <a
-        id="recoverAccessLink"
-        href="/recuperar-acesso.html"
-      >
-        Esqueci o utilizador ou a palavra-passe
-      </a>
-    </form>
-
-    <button
-      id="authSwitch"
-      class="link-button"
-      type="button"
-    ></button>
-  </dialog>
+  <button
+    id="authSwitch"
+    class="link-button"
+    type="button"
+  ></button>
+</dialog>
 
   <script src="/app.js?v=41"></script>
 </body>
