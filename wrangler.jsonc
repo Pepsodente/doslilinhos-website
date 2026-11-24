@@ -20,6 +20,13 @@
     }
   ],
 
+  "r2_buckets": [
+    {
+      "binding": "DOCUMENTS",
+      "bucket_name": "doslilinhos-documentos"
+    }
+  ],
+
   "vars": {
     "ADMIN_EMAIL": "encomendas@doslilinhos.pt",
     "EMAIL_FROM": "Dos Lilinhos <encomendas@doslilinhos.pt>",
