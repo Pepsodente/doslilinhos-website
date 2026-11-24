@@ -1,4 +1,156 @@
-const $=(s,p=document)=>p.querySelector(s),$$=(s,p=document)=>[...p.querySelectorAll(s)];let me=null,mode='login',stock={};const freq={weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'},substat={requested:'A aguardar aprovação',active:'Ativa',paused:'Pausada',cancelled:'Cancelada',rejected:'Recusada'},status={pending:'Pedido recebido',confirmed:'Confirmada',completed:'Concluída',cancelled:'Cancelada',expired:'Expirada'};function notice(t){const e=document.createElement('div');e.className='notice';e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),5000)}async function api(p,o={}){const r=await fetch(p,{...o,headers:{Accept:'application/json',...(o.body?{'Content-Type':'application/json'}:{}),...(o.headers||{})}}),d=await r.json();if(!r.ok||d.success===false)throw new Error(d.error||`Erro ${r.status}`);return d}$('#year')&&($('#year').textContent=new Date().getFullYear());$('#menuButton')?.addEventListener('click',()=>document.body.classList.toggle('menu-open'));$('#avatarButton')?.addEventListener('click',e=>{e.stopPropagation();const x=$('#avatarMenu').classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',x)});$('#avatarMenu')?.addEventListener('click',e=>e.stopPropagation());document.addEventListener('click',()=>$('#avatarMenu')?.classList.remove('open'));async function session(){const d=await api('/api/auth/me');me=d.customer;document.body.classList.toggle('authenticated',d.authenticated);if(me){$('#menuName').textContent=me.username||me.name;$('#menuEmail').textContent=me.email;$('#welcomeTitle')&&($('#welcomeTitle').textContent=`Olá, ${me.username||me.name}`)}else if(document.body.classList.contains('requires-auth'))location.href='/?login=1'}session().catch(console.error);function auth(m){mode=m;const reg=m==='register';$('#authTitle').textContent=reg?'Criar conta':'Entrar';$$('.register-field').forEach(x=>{x.hidden=!reg;x.style.display=reg?'':'none'});const identifier=$('#authIdentifier'),email=$('#authEmail');if(identifier){identifier.hidden=reg;identifier.disabled=reg;identifier.required=!reg}if(email){email.closest('label').hidden=!reg;email.disabled=!reg;email.required=reg}const recover=$('#recoverAccessLink');if(recover){recover.hidden=reg;recover.style.display=reg?'none':'block'}$('#authSubmit').textContent=reg?'Criar conta':'Entrar';$('#authSwitch').textContent=reg?'Já tem conta? Entrar':'Ainda não tem conta? Criar conta';$('#authMessage').textContent='';$('#authDialog').showModal()}$$('[data-auth]').forEach(b=>b.onclick=()=>auth(b.dataset.auth));$('#authSwitch')?.addEventListener('click',()=>auth(mode==='login'?'register':'login'));$$('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#authForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),body={password:d.get('password')};if(mode==='login')body.identifier=String(d.get('identifier')||'').trim();if(mode==='register'){body.email=String(d.get('email')||'').trim();const u=String(d.get('username')||'').trim(),c=String(d.get('passwordConfirmation')||'');if(!/^[A-Za-z0-9._-]{3,30}$/.test(u))return $('#authMessage').textContent='Nome de utilizador inválido ou com espaços.';if(body.password!==c)return $('#authMessage').textContent='As palavras-passe não coincidem.';Object.assign(body,{name:d.get('name'),username:u,passwordConfirmation:c,notificationsEnabled:!!d.get('notificationsEnabled'),privacyAccepted:!!d.get('privacyAccepted')})}try{await api(`/api/auth/${mode}`,{method:'POST',body:JSON.stringify(body)});f.reset();location.href='/area-cliente.html'}catch(x){$('#authMessage').textContent=x.message}});$('#logoutButton')?.addEventListener('click',async()=>{await api('/api/auth/logout',{method:'POST'});location.href='/'});async function loadStock(){if(!$('#stockPanel'))return;const d=await api('/api/stock');stock=d.stock;$('#stockPanel').textContent=`${stock.availableEggs} ovos disponíveis`;$('#eggFormats').innerHTML=[6,12,18,30].filter(x=>x<=stock.availableEggs).map((x,i)=>`<button class="format ${i?'':'active'}" data-eggs="${x}">${x} ovos</button>`).join('');$$('.format').forEach(b=>b.onclick=()=>{$$('.format').forEach(x=>x.classList.toggle('active',x===b))})}loadStock().catch(console.error);$('#reserveButton')?.addEventListener('click',()=>{if(!me)return auth('login');const e=$('.format.active')?.dataset.eggs;if(!e)return;$('#orderSummary').textContent=`Pedido de ${e} ovos`;$('#orderDialog').dataset.eggs=e;$('#orderDialog').showModal()});$('#orderForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),eggs=Number($('#orderDialog').dataset.eggs);await api('/api/reservations',{method:'POST',body:JSON.stringify({packs:eggs/6,notes:d.get('notes'),termsAccepted:!!d.get('termsAccepted')})});location.href='/encomendas.html'});$('#subscribeButton')?.addEventListener('click',()=>me?$('#subscriptionDialog').showModal():auth('login'));$('#subscriptionForm')?.addEventListener('submit',async e=>{e.preventDefault();const d=new FormData(e.currentTarget);await api('/api/subscriptions',{method:'POST',body:JSON.stringify({eggs:+d.get('eggs'),frequency:d.get('frequency'),shortagePreference:d.get('shortage'),termsAccepted:!!d.get('termsAccepted')})});location.href='/subscricoes.html'});
+const $=(s,p=document)=>p.querySelector(s),$$=(s,p=document)=>[...p.querySelectorAll(s)];let me=null,mode='login',stock={};const freq={weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'},substat={requested:'A aguardar aprovação',active:'Ativa',paused:'Pausada',cancelled:'Cancelada',rejected:'Recusada'},status={pending:'Pedido recebido',confirmed:'Confirmada',completed:'Concluída',cancelled:'Cancelada',expired:'Expirada'};function notice(t){const e=document.createElement('div');e.className='notice';e.textContent=t;document.body.append(e);setTimeout(()=>e.remove(),5000)}async function api(p,o={}){const r=await fetch(p,{...o,headers:{Accept:'application/json',...(o.body?{'Content-Type':'application/json'}:{}),...(o.headers||{})}}),d=await r.json();if(!r.ok||d.success===false)throw new Error(d.error||`Erro ${r.status}`);return d}$('#year')&&($('#year').textContent=new Date().getFullYear());$('#menuButton')?.addEventListener('click',()=>document.body.classList.toggle('menu-open'));$('#avatarButton')?.addEventListener('click',e=>{e.stopPropagation();const x=$('#avatarMenu').classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',x)});$('#avatarMenu')?.addEventListener('click',e=>e.stopPropagation());document.addEventListener('click',()=>$('#avatarMenu')?.classList.remove('open'));async function session(){const d=await api('/api/auth/me');me=d.customer;document.body.classList.toggle('authenticated',d.authenticated);if(me){$('#menuName').textContent=me.username||me.name;$('#menuEmail').textContent=me.email;$('#welcomeTitle')&&($('#welcomeTitle').textContent=`Olá, ${me.username||me.name}`)}else if(document.body.classList.contains('requires-auth'))location.href='/?login=1'}session().catch(console.error);
+function auth(selectedMode) {
+  mode = selectedMode;
+
+  const registering =
+    selectedMode === 'register';
+
+  const dialog =
+    $('#authDialog');
+
+  const title =
+    $('#authTitle');
+
+  const submitButton =
+    $('#authSubmit');
+
+  const switchButton =
+    $('#authSwitch');
+
+  const message =
+    $('#authMessage');
+
+  const identifier =
+    $('#authIdentifier');
+
+  const email =
+    $('#authEmail');
+
+  const recoveryLink =
+    $('#recoverAccessLink');
+
+  /*
+   * Mostrar os campos de registo apenas
+   * quando se está a criar uma conta.
+   *
+   * Os controlos também são desativados no login,
+   * para que campos obrigatórios ocultos não
+   * impeçam o envio do formulário.
+   */
+  $$('.register-field').forEach(
+    field => {
+      field.hidden = !registering;
+
+      field.style.display =
+        registering
+          ? ''
+          : 'none';
+
+      field
+        .querySelectorAll(
+          'input, select, textarea'
+        )
+        .forEach(control => {
+          control.disabled =
+            !registering;
+        });
+    }
+  );
+
+  if (identifier) {
+    const identifierLabel =
+      identifier.closest('label');
+
+    identifier.disabled =
+      registering;
+
+    identifier.required =
+      !registering;
+
+    if (identifierLabel) {
+      identifierLabel.hidden =
+        registering;
+
+      identifierLabel.style.display =
+        registering
+          ? 'none'
+          : '';
+    }
+  }
+
+  if (email) {
+    const emailLabel =
+      email.closest('label');
+
+    email.disabled =
+      !registering;
+
+    email.required =
+      registering;
+
+    if (emailLabel) {
+      emailLabel.hidden =
+        !registering;
+
+      emailLabel.style.display =
+        registering
+          ? ''
+          : 'none';
+    }
+  }
+
+  /*
+   * A palavra-passe muda também a indicação
+   * dada ao gestor de palavras-passe.
+   */
+  const password =
+    $('#authForm input[name="password"]');
+
+  if (password) {
+    password.autocomplete =
+      registering
+        ? 'new-password'
+        : 'current-password';
+  }
+
+  if (title) {
+    title.textContent =
+      registering
+        ? 'Criar conta'
+        : 'Entrar';
+  }
+
+  if (submitButton) {
+    submitButton.textContent =
+      registering
+        ? 'Criar conta'
+        : 'Entrar';
+  }
+
+  if (switchButton) {
+    switchButton.textContent =
+      registering
+        ? 'Já tem conta? Entrar'
+        : 'Ainda não tem conta? Criar conta';
+  }
+
+  if (recoveryLink) {
+    recoveryLink.hidden =
+      registering;
+
+    recoveryLink.style.display =
+      registering
+        ? 'none'
+        : 'block';
+  }
+
+  if (message) {
+    message.textContent = '';
+  }
+
+  dialog?.showModal();
+}
+$$('[data-auth]').forEach(b=>b.onclick=()=>auth(b.dataset.auth));$('#authSwitch')?.addEventListener('click',()=>auth(mode==='login'?'register':'login'));$$('dialog .close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('#authForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),body={password:d.get('password')};if(mode==='login')body.identifier=String(d.get('identifier')||'').trim();if(mode==='register'){body.email=String(d.get('email')||'').trim();const u=String(d.get('username')||'').trim(),c=String(d.get('passwordConfirmation')||'');if(!/^[A-Za-z0-9._-]{3,30}$/.test(u))return $('#authMessage').textContent='Nome de utilizador inválido ou com espaços.';if(body.password!==c)return $('#authMessage').textContent='As palavras-passe não coincidem.';Object.assign(body,{name:d.get('name'),username:u,passwordConfirmation:c,notificationsEnabled:!!d.get('notificationsEnabled'),privacyAccepted:!!d.get('privacyAccepted')})}try{await api(`/api/auth/${mode}`,{method:'POST',body:JSON.stringify(body)});f.reset();location.href='/area-cliente.html'}catch(x){$('#authMessage').textContent=x.message}});$('#logoutButton')?.addEventListener('click',async()=>{await api('/api/auth/logout',{method:'POST'});location.href='/'});async function loadStock(){if(!$('#stockPanel'))return;const d=await api('/api/stock');stock=d.stock;$('#stockPanel').textContent=`${stock.availableEggs} ovos disponíveis`;$('#eggFormats').innerHTML=[6,12,18,30].filter(x=>x<=stock.availableEggs).map((x,i)=>`<button class="format ${i?'':'active'}" data-eggs="${x}">${x} ovos</button>`).join('');$$('.format').forEach(b=>b.onclick=()=>{$$('.format').forEach(x=>x.classList.toggle('active',x===b))})}loadStock().catch(console.error);$('#reserveButton')?.addEventListener('click',()=>{if(!me)return auth('login');const e=$('.format.active')?.dataset.eggs;if(!e)return;$('#orderSummary').textContent=`Pedido de ${e} ovos`;$('#orderDialog').dataset.eggs=e;$('#orderDialog').showModal()});$('#orderForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=new FormData(f),eggs=Number($('#orderDialog').dataset.eggs);await api('/api/reservations',{method:'POST',body:JSON.stringify({packs:eggs/6,notes:d.get('notes'),termsAccepted:!!d.get('termsAccepted')})});location.href='/encomendas.html'});$('#subscribeButton')?.addEventListener('click',()=>me?$('#subscriptionDialog').showModal():auth('login'));$('#subscriptionForm')?.addEventListener('submit',async e=>{e.preventDefault();const d=new FormData(e.currentTarget);await api('/api/subscriptions',{method:'POST',body:JSON.stringify({eggs:+d.get('eggs'),frequency:d.get('frequency'),shortagePreference:d.get('shortage'),termsAccepted:!!d.get('termsAccepted')})});location.href='/subscricoes.html'});
 function escapeHtml(value) {
   const replacements = {
     '\u0026': '\u0026amp;',
