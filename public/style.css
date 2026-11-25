@@ -1144,6 +1144,11 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
   display: block;
 }
 
+
+.customer-view.active {
+  display: block;
+}
+
 .customer-nav-button {
   display: grid;
   grid-template-columns: 27px 1fr;
