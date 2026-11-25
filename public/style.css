@@ -1214,3 +1214,30 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
   background: #315f37;
   color: #ffffff;
 }
+.customer-order-preview {
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid #dce2da;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.customer-order-preview strong {
+  display: block;
+  color: #315f37;
+}
+
+.customer-order-preview small {
+  color: #68736b;
+}
+
+.customer-profile-card {
+  padding: 18px;
+  border: 1px solid #dce2da;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.customer-profile-card p {
+  margin: 0 0 14px;
+}
