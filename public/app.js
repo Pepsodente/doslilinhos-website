@@ -664,3 +664,39 @@ if (document.readyState === 'loading') {
 } else {
   resizeLivroReclamacoesIcon();
 }
+$$('.customer-nav-button')
+  .forEach(button => {
+    button.addEventListener(
+      'click',
+      () => {
+        const targetView =
+          button.dataset.view;
+
+        $$('.customer-nav-button')
+          .forEach(item =>
+            item.classList.remove(
+              'active'
+            )
+          );
+
+        button.classList.add(
+          'active'
+        );
+
+        $$('.customer-view')
+          .forEach(panel =>
+            panel.classList.remove(
+              'active'
+            )
+          );
+
+        document
+          .querySelector(
+            `#view-${targetView}`
+          )
+          ?.classList.add(
+            'active'
+          );
+      }
+    );
+  });
