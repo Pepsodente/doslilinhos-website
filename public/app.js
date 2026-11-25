@@ -1076,3 +1076,136 @@ async function loadCustomerPanels() {
 
 loadCustomerPanels()
   .catch(console.error);
+async function populateCustomerViews() {
+
+  const ordersTarget =
+    document.querySelector(
+      '#dashboardOrders'
+    );
+
+  const subscriptionsTarget =
+    document.querySelector(
+      '#dashboardSubscriptions'
+    );
+
+  const profileTarget =
+    document.querySelector(
+      '#dashboardProfile'
+    );
+
+  try {
+
+    const [
+      ordersData,
+      subscriptionsData,
+      authData
+    ] = await Promise.all([
+      api('/api/my/orders'),
+      api('/api/my/subscriptions'),
+      api('/api/auth/me')
+    ]);
+
+    const orders =
+      ordersData.orders || [];
+
+    const subscriptions =
+      subscriptionsData.subscriptions || [];
+
+    const customer =
+      authData.customer || null;
+
+    if (ordersTarget) {
+
+      ordersTarget.innerHTML =
+        orders.length
+
+          ? orders.map(order => `
+              <article class="customer-panel-card">
+
+                <strong>
+                  ${order.order_number}
+                </strong>
+
+                <div>
+                  ${(order.total_cents / 100).toFixed(2)} €
+                </div>
+
+                <small>
+                  ${
+                    order.payment_status === 'paid'
+                      ? 'Pagamento recebido'
+                      : order.status
+                  }
+                </small>
+
+              </article>
+            `).join('')
+
+          : '<p>Ainda não existem encomendas.</p>';
+    }
+
+    if (subscriptionsTarget) {
+
+      subscriptionsTarget.innerHTML =
+        subscriptions.length
+
+          ? subscriptions.map(subscription => `
+              <article class="customer-panel-card">
+
+                <strong>
+                  ${subscription.eggs_per_delivery} ovos
+                </strong>
+
+                <div>
+                  ${
+                    freq[
+                      subscription.frequency
+                    ] || subscription.frequency
+                  }
+                </div>
+
+                <small>
+                  ${
+                    substat[
+                      subscription.status
+                    ] || subscription.status
+                  }
+                </small>
+
+              </article>
+            `).join('')
+
+          : '<p>Ainda não existem subscrições.</p>';
+    }
+
+    if (
+      profileTarget &&
+      customer
+    ) {
+
+      profileTarget.innerHTML = `
+        <article class="customer-profile-card">
+
+          <p>
+            <strong>Nome</strong><br>
+            ${customer.name || ''}
+          </p>
+
+          <p>
+            <strong>Nome de utilizador</strong><br>
+            ${customer.username || ''}
+          </p>
+
+          <p>
+            <strong>Email</strong><br>
+            ${customer.email || ''}
+          </p>
+
+          <a
+            class="button outline"
+            href="/perfil.html"
+          >
+            Editar perfil
+          </a>
+
+        </
