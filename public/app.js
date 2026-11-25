@@ -918,3 +918,161 @@ if (
   loadCustomerDashboard()
     .catch(console.error);
 }
+async function loadCustomerPanels() {
+
+  const ordersContainer =
+    document.querySelector(
+      '#dashboardOrders'
+    );
+
+  const subscriptionsContainer =
+    document.querySelector(
+      '#dashboardSubscriptions'
+    );
+
+  const profileContainer =
+    document.querySelector(
+      '#dashboardProfile'
+    );
+
+  try {
+
+    const [
+      ordersResponse,
+      subscriptionsResponse,
+      meResponse
+    ] = await Promise.all([
+      api('/api/my/orders'),
+      api('/api/my/subscriptions'),
+      api('/api/auth/me')
+    ]);
+
+    const orders =
+      ordersResponse.orders || [];
+
+    const subscriptions =
+      subscriptionsResponse.subscriptions || [];
+
+    const customer =
+      meResponse.customer || null;
+
+    if (ordersContainer) {
+
+      if (!orders.length) {
+
+        ordersContainer.innerHTML = `
+          <p>
+            Ainda não existem encomendas.
+          </p>
+        `;
+
+      } else {
+
+        ordersContainer.innerHTML =
+          orders
+            .map(order => `
+              <article class="customer-order-preview">
+
+                <strong>
+                  ${order.order_number}
+                </strong>
+
+                <div>
+                  ${(
+                    Number(order.total_cents) / 100
+                  ).toFixed(2)} €
+                </div>
+
+                <small>
+                  ${
+                    order.payment_status === 'paid'
+                      ? 'Pagamento recebido'
+                      : order.status
+                  }
+                </small>
+
+              </article>
+            `)
+            .join('');
+      }
+    }
+
+    if (subscriptionsContainer) {
+
+      if (!subscriptions.length) {
+
+        subscriptionsContainer.innerHTML = `
+          <p>
+            Ainda não existem subscrições.
+          </p>
+        `;
+
+      } else {
+
+        subscriptionsContainer.innerHTML =
+          subscriptions
+            .map(subscription => `
+              <article class="customer-order-preview">
+
+                <strong>
+                  ${subscription.eggs_per_delivery} ovos
+                </strong>
+
+                <div>
+                  ${
+                    freq[
+                      subscription.frequency
+                    ] || subscription.frequency
+                  }
+                </div>
+
+                <small>
+                  ${
+                    substat[
+                      subscription.status
+                    ] || subscription.status
+                  }
+                </small>
+
+              </article>
+            `)
+            .join('');
+      }
+    }
+
+    if (
+      profileContainer &&
+      customer
+    ) {
+
+      profileContainer.innerHTML = `
+        <article class="customer-profile-card">
+
+          <p>
+            <strong>Nome</strong><br>
+            ${customer.name || ''}
+          </p>
+
+          <p>
+            <strong>Nome de utilizador</strong><br>
+            ${customer.username || ''}
+          </p>
+
+          <p>
+            <strong>Email</strong><br>
+            ${customer.email || ''}
+          </p>
+
+        </article>
+      `;
+    }
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+}
+
+loadCustomerPanels()
+  .catch(console.error);
