@@ -1136,3 +1136,37 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
     grid-template-columns: 1fr;
   }
 }
+.customer-view {
+  display: none;
+}
+
+.customer-view.active {
+  display: block;
+}
+
+.customer-nav-button {
+  display: grid;
+  grid-template-columns: 27px 1fr;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #465049;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: left;
+  cursor: pointer;
+}
+
+.customer-nav-button:hover {
+  background: #f0f6f1;
+}
+
+.customer-nav-button.active {
+  background: #315f37;
+  color: #ffffff;
+}
