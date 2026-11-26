@@ -1384,3 +1384,58 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
   font-size: 12px;
   font-weight: 700;
 }
+/* =========================================================
+   CORREÇÃO FORMULÁRIOS ÁREA CLIENTE
+   ========================================================= */
+
+#view-profile,
+#view-fiscal,
+#view-addresses,
+#view-security {
+  padding: 0;
+}
+
+.customer-form-grid {
+  display: grid !important;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(280px,1fr)
+    ) !important;
+  gap: 20px !important;
+}
+
+.customer-form-grid label {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.customer-form-grid input,
+.customer-form-grid select,
+.customer-form-grid textarea {
+  width: 100% !important;
+}
+
+.customer-form-wide {
+  grid-column: 1 / -1 !important;
+}
+
+#shippingAddressBlock {
+  margin-top: 24px;
+}
+
+.customer-avatar-editor {
+  display: flex !important;
+  align-items: center !important;
+  gap: 24px !important;
+  margin-bottom: 26px !important;
+}
+
+.customer-avatar-preview {
+  width: 120px !important;
+  height: 120px !important;
+}
+
+.customer-danger-zone {
+  margin-top: 24px !important;
+}
