@@ -1152,3 +1152,234 @@ if (
 } else {
   initializeCustomerArea();
 }
+/* =========================================================
+   PERFIL
+   ========================================================= */
+
+async function loadCustomerProfile() {
+
+  const profileForm =
+    document.querySelector(
+      '#customerProfileForm'
+    );
+
+  if (!profileForm) {
+    return;
+  }
+
+  const response =
+    await api(
+      '/api/my/profile-details'
+    );
+
+  const profile =
+    response.profile;
+
+  profileForm.name.value =
+    profile.name || '';
+
+  profileForm.username.value =
+    profile.username || '';
+
+  profileForm.email.value =
+    profile.email || '';
+
+  profileForm.phone.value =
+    profile.phone || '';
+
+  profileForm.notificationsEnabled.checked =
+    Boolean(profile.notificationsEnabled);
+
+  const avatarPreview =
+    document.querySelector(
+      '#customerAvatarPreview'
+    );
+
+  const removeAvatar =
+    document.querySelector(
+      '#removeCustomerAvatar'
+    );
+
+  if (
+    profile.avatarAvailable &&
+    profile.avatarUrl &&
+    avatarPreview
+  ) {
+
+    avatarPreview.innerHTML = `
+      <img
+        src="${profile.avatarUrl}"
+        alt="Fotografia"
+      >
+    `;
+
+    if (removeAvatar) {
+      removeAvatar.hidden = false;
+    }
+  }
+
+  profileForm.addEventListener(
+    'submit',
+    async event => {
+
+      event.preventDefault();
+
+      const formData =
+        new FormData(profileForm);
+
+      try {
+
+        await api(
+          '/api/my/profile-details',
+          {
+            method: 'PATCH',
+
+            body: JSON.stringify({
+              name:
+                formData.get('name'),
+
+              username:
+                formData.get('username'),
+
+              phone:
+                formData.get('phone'),
+
+              notificationsEnabled:
+                formData.get(
+                  'notificationsEnabled'
+                ) === 'on'
+            })
+          }
+        );
+
+        document.querySelector(
+          '#customerProfileMessage'
+        ).textContent =
+          'Perfil atualizado.';
+
+      } catch (error) {
+
+        document.querySelector(
+          '#customerProfileMessage'
+        ).textContent =
+          error.message;
+      }
+    }
+  );
+}
+
+/* =========================================================
+   DADOS FISCAIS
+   ========================================================= */
+
+async function loadFiscalProfile() {
+
+  const fiscalForm =
+    document.querySelector(
+      '#customerFiscalForm'
+    );
+
+  if (!fiscalForm) {
+    return;
+  }
+
+  const response =
+    await api(
+      '/api/my/fiscal-profile'
+    );
+
+  const fiscal =
+    response.fiscalProfile;
+
+  fiscalForm.customerType.value =
+    fiscal.customer_type || 'individual';
+
+  fiscalForm.fiscalName.value =
+    fiscal.fiscal_name || '';
+
+  fiscalForm.taxNumber.value =
+    fiscal.tax_number || '';
+
+  fiscalForm.billingEmail.value =
+    fiscal.billing_email || '';
+
+  fiscalForm.fiscalCountry.value =
+    fiscal.fiscal_country || 'PT';
+
+  fiscalForm.addEventListener(
+    'submit',
+    async event => {
+
+      event.preventDefault();
+
+      const formData =
+        new FormData(fiscalForm);
+
+      try {
+
+        await api(
+          '/api/my/fiscal-profile',
+          {
+            method: 'PUT',
+
+            body: JSON.stringify({
+              customerType:
+                formData.get(
+                  'customerType'
+                ),
+
+              fiscalName:
+                formData.get(
+                  'fiscalName'
+                ),
+
+              taxNumber:
+                formData.get(
+                  'taxNumber'
+                ),
+
+              billingEmail:
+                formData.get(
+                  'billingEmail'
+                ),
+
+              fiscalCountry:
+                formData.get(
+                  'fiscalCountry'
+                )
+            })
+          }
+        );
+
+        document.querySelector(
+          '#customerFiscalMessage'
+        ).textContent =
+          'Dados fiscais guardados.';
+
+      } catch (error) {
+
+        document.querySelector(
+          '#customerFiscalMessage'
+        ).textContent =
+          error.message;
+      }
+    }
+  );
+}
+
+/* =========================================================
+   INICIALIZAÇÃO
+   ========================================================= */
+
+document.addEventListener(
+  'DOMContentLoaded',
+  () => {
+
+    loadCustomerProfile()
+      .catch(console.error);
+
+    loadFiscalProfile()
+      .catch(console.error);
+
+  }
+);
