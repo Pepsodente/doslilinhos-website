@@ -2552,6 +2552,120 @@ function buildAtOrderReference(
     ...items
   ].join('//');
 }
+/* =========================================================
+   ÁREA DE CLIENTE: VALIDAÇÕES E FORMATOS
+   ========================================================= */
+
+function normalizePortuguesePostalCode(value) {
+  const digits =
+    String(value || '')
+      .replace(/\D/g, '')
+      .slice(0, 7);
+
+  if (digits.length !== 7) {
+    return null;
+  }
+
+  return (
+    digits.slice(0, 4) +
+    '-' +
+    digits.slice(4)
+  );
+}
+
+function isValidPortugueseTaxNumber(value) {
+  const taxNumber =
+    String(value || '')
+      .replace(/\D/g, '');
+
+  if (!/^\d{9}$/.test(taxNumber)) {
+    return false;
+  }
+
+  const validInitialDigits = [
+    '1',
+    '2',
+    '3',
+    '5',
+    '6',
+    '8',
+    '9'
+  ];
+
+  if (
+    !validInitialDigits.includes(
+      taxNumber[0]
+    )
+  ) {
+    return false;
+  }
+
+  const sum =
+    Number(taxNumber[0]) * 9 +
+    Number(taxNumber[1]) * 8 +
+    Number(taxNumber[2]) * 7 +
+    Number(taxNumber[3]) * 6 +
+    Number(taxNumber[4]) * 5 +
+    Number(taxNumber[5]) * 4 +
+    Number(taxNumber[6]) * 3 +
+    Number(taxNumber[7]) * 2;
+
+  const remainder = sum % 11;
+
+  const checkDigit =
+    remainder < 2
+      ? 0
+      : 11 - remainder;
+
+  return (
+    checkDigit ===
+    Number(taxNumber[8])
+  );
+}
+
+function cleanCustomerText(
+  value,
+  maximumLength = 255
+) {
+  return String(value || '')
+    .trim()
+    .slice(0, maximumLength);
+}
+
+function normalizeCustomerEmail(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 254);
+}
+
+function isValidCustomerEmail(value) {
+  const email =
+    normalizeCustomerEmail(value);
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    .test(email);
+}
+
+function avatarExtension(contentType) {
+  const extensions = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp'
+  };
+
+  return extensions[contentType] || null;
+}
+
+function avatarContentTypeIsAllowed(
+  contentType
+) {
+  return [
+    'image/jpeg',
+    'image/png',
+    'image/webp'
+  ].includes(contentType);
+}
 async function route(r,e){const u=new URL(r.url),p=u.pathname,m=r.method;
 if(p==='/api/payments/webhook'&&m==='POST'){const raw=await r.text();if(!await verifyStripe(raw,r.headers.get('stripe-signature'),e.STRIPE_WEBHOOK_SECRET))return out({error:'Assinatura inválida.'},400);const event=JSON.parse(raw);if(await e.DB.prepare('SELECT id FROM payment_events WHERE provider_event_id=?').bind(event.id).first())return out({received:true});await e.DB.prepare('INSERT INTO payment_events(provider_event_id,event_type,payload) VALUES(?,?,?)').bind(event.id,event.type,raw).run();const session=event.data?.object,orderId=Number(session?.metadata?.order_id||session?.client_reference_id||0);if (
   orderId &&
@@ -4222,4 +4336,1161 @@ if(p==='/api/auth/login'&&m==='POST'){const b=await r.json(),identifier=String(b
     success: true,
     orders
   });
-}if(p==='/api/subscriptions'&&m==='POST'){const c=await customer(r,e),b=await r.json(),pr=await product(e);if(!c)return out({error:'Inicia sessão.'},401);const sub=await e.DB.prepare(`INSERT INTO subscriptions(customer_id,product_id,eggs_per_delivery,frequency,shortage_preference,status,terms_version) VALUES(?,?,?,?,?,'requested','2026-10-28')`).bind(c.id,pr.id,b.eggs,b.frequency,b.shortagePreference).run();await sendEmail(e,e.DB,{type:'subscription_received',to:c.email,customerId:c.id,subscriptionId:sub.meta.last_row_id,data:{name:c.name,product:pr.name,quantity:`${b.eggs} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[b.frequency]||b.frequency,shortage:{wait:'Aguardar produção',lower:'Aceitar quantidade inferior',skip:'Saltar entrega'}[b.shortagePreference]||b.shortagePreference,url:`${e.SITE_URL}/subscricoes.html`}});return out({success:true},201)}if(p==='/api/my/subscriptions'){const c=await customer(r,e);if(!c)return out({error:'Inicia sessão.'},401);const q=await e.DB.prepare('SELECT * FROM subscriptions WHERE customer_id=? ORDER BY created_at DESC').bind(c.id).all();return out({success:true,subscriptions:q.results})}return null}export default{async fetch(r,e){try{return await route(r,e)||e.ASSETS.fetch(r)}catch(x){console.error(x);return out({success:false,error:x.message||'Erro interno.'},500)}}}
+}if(p==='/api/subscriptions'&&m==='POST'){const c=await customer(r,e),b=await r.json(),pr=await product(e);if(!c)return out({error:'Inicia sessão.'},401);const sub=await e.DB.prepare(`INSERT INTO subscriptions(customer_id,product_id,eggs_per_delivery,frequency,shortage_preference,status,terms_version) VALUES(?,?,?,?,?,'requested','2026-10-28')`).bind(c.id,pr.id,b.eggs,b.frequency,b.shortagePreference).run();await sendEmail(e,e.DB,{type:'subscription_received',to:c.email,customerId:c.id,subscriptionId:sub.meta.last_row_id,data:{name:c.name,product:pr.name,quantity:`${b.eggs} unidades`,frequency:{weekly:'Semanal',biweekly:'Quinzenal',monthly:'Mensal'}[b.frequency]||b.frequency,shortage:{wait:'Aguardar produção',lower:'Aceitar quantidade inferior',skip:'Saltar entrega'}[b.shortagePreference]||b.shortagePreference,url:`${e.SITE_URL}/subscricoes.html`}});return out({success:true},201)}
+/* =========================================================
+   SUBSCRIÇÕES DO CLIENTE
+   ========================================================= */
+
+if (
+  p === '/api/my/subscriptions' &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const result =
+    await e.DB.prepare(`
+      SELECT *
+      FROM subscriptions
+      WHERE customer_id = ?
+      ORDER BY created_at DESC
+    `)
+      .bind(currentCustomer.id)
+      .all();
+
+  return out({
+    success: true,
+    subscriptions:
+      result.results || []
+  });
+}
+
+/* =========================================================
+   PERFIL COMPLEMENTAR
+   ========================================================= */
+
+if (
+  p === '/api/my/profile-details' &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const profile =
+    await e.DB.prepare(`
+      SELECT
+        phone,
+        avatar_storage_key,
+        avatar_content_type,
+        avatar_updated_at
+      FROM customer_profiles
+      WHERE customer_id = ?
+    `)
+      .bind(currentCustomer.id)
+      .first();
+
+  return out({
+    success: true,
+
+    profile: {
+      name:
+        currentCustomer.name || '',
+
+      username:
+        currentCustomer.username || '',
+
+      email:
+        currentCustomer.email || '',
+
+      notificationsEnabled:
+        Boolean(
+          currentCustomer
+            .notifications_enabled
+        ),
+
+      phone:
+        profile?.phone || '',
+
+      avatarAvailable:
+        Boolean(
+          profile?.avatar_storage_key
+        ),
+
+      avatarUrl:
+        profile?.avatar_storage_key
+          ? (
+              '/api/my/avatar?v=' +
+              encodeURIComponent(
+                profile.avatar_updated_at ||
+                Date.now()
+              )
+            )
+          : null
+    }
+  });
+}
+
+if (
+  p === '/api/my/profile-details' &&
+  m === 'PATCH'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const body = await r.json();
+
+  const name =
+    cleanCustomerText(
+      body.name,
+      120
+    );
+
+  const username =
+    cleanCustomerText(
+      body.username,
+      30
+    ).toLowerCase();
+
+  const phone =
+    cleanCustomerText(
+      body.phone,
+      30
+    );
+
+  if (name.length < 2) {
+    return out(
+      {
+        error:
+          'Indica o nome completo.'
+      },
+      400
+    );
+  }
+
+  if (
+    !/^[a-z0-9._-]{3,30}$/
+      .test(username)
+  ) {
+    return out(
+      {
+        error:
+          'O nome de utilizador é inválido.'
+      },
+      400
+    );
+  }
+
+  const usernameOwner =
+    await e.DB.prepare(`
+      SELECT id
+      FROM customers
+      WHERE username = ?
+        AND id <> ?
+    `)
+      .bind(
+        username,
+        currentCustomer.id
+      )
+      .first();
+
+  if (usernameOwner) {
+    return out(
+      {
+        error:
+          'O nome de utilizador já está ocupado.'
+      },
+      409
+    );
+  }
+
+  await e.DB.batch([
+    e.DB.prepare(`
+      UPDATE customers
+      SET
+        name = ?,
+        username = ?,
+        notifications_enabled = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(
+      name,
+      username,
+      body.notificationsEnabled
+        ? 1
+        : 0,
+      currentCustomer.id
+    ),
+
+    e.DB.prepare(`
+      INSERT INTO customer_profiles (
+        customer_id,
+        phone,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ?,
+        ?,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT(customer_id)
+      DO UPDATE SET
+        phone = excluded.phone,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(
+      currentCustomer.id,
+      phone || null
+    )
+  ]);
+
+  return out({
+    success: true,
+    message: 'Perfil atualizado.'
+  });
+}
+
+/* =========================================================
+   FOTOGRAFIA DO PERFIL
+   ========================================================= */
+
+if (
+  p === '/api/my/avatar' &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const profile =
+    await e.DB.prepare(`
+      SELECT
+        avatar_storage_key,
+        avatar_content_type
+      FROM customer_profiles
+      WHERE customer_id = ?
+    `)
+      .bind(currentCustomer.id)
+      .first();
+
+  if (
+    !profile?.avatar_storage_key
+  ) {
+    return out(
+      {
+        error:
+          'Fotografia não configurada.'
+      },
+      404
+    );
+  }
+
+  const avatarObject =
+    await e.DOCUMENTS.get(
+      profile.avatar_storage_key
+    );
+
+  if (!avatarObject) {
+    return out(
+      {
+        error:
+          'Fotografia não encontrada.'
+      },
+      404
+    );
+  }
+
+  return new Response(
+    avatarObject.body,
+    {
+      status: 200,
+
+      headers: {
+        'content-type':
+          profile.avatar_content_type ||
+          avatarObject.httpMetadata
+            ?.contentType ||
+          'application/octet-stream',
+
+        'cache-control':
+          'private, no-store',
+
+        'content-disposition':
+          'inline',
+
+        'x-content-type-options':
+          'nosniff'
+      }
+    }
+  );
+}
+
+if (
+  p === '/api/my/avatar' &&
+  m === 'POST'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const contentType =
+    String(
+      r.headers.get(
+        'content-type'
+      ) || ''
+    )
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+
+  if (
+    !avatarContentTypeIsAllowed(
+      contentType
+    )
+  ) {
+    return out(
+      {
+        error:
+          'Utiliza uma fotografia JPEG, PNG ou WebP.'
+      },
+      415
+    );
+  }
+
+  const avatarBytes =
+    new Uint8Array(
+      await r.arrayBuffer()
+    );
+
+  const maximumAvatarSize =
+    5 * 1024 * 1024;
+
+  if (
+    avatarBytes.length < 1 ||
+    avatarBytes.length >
+      maximumAvatarSize
+  ) {
+    return out(
+      {
+        error:
+          'A fotografia deve ter no máximo 5 MB.'
+      },
+      413
+    );
+  }
+
+  const extension =
+    avatarExtension(contentType);
+
+  const oldProfile =
+    await e.DB.prepare(`
+      SELECT avatar_storage_key
+      FROM customer_profiles
+      WHERE customer_id = ?
+    `)
+      .bind(currentCustomer.id)
+      .first();
+
+  const storageKey =
+    'customer-avatars/' +
+    currentCustomer.id +
+    '/' +
+    crypto.randomUUID() +
+    '.' +
+    extension;
+
+  await e.DOCUMENTS.put(
+    storageKey,
+    avatarBytes,
+    {
+      httpMetadata: {
+        contentType
+      },
+
+      customMetadata: {
+        customerId:
+          String(
+            currentCustomer.id
+          )
+      }
+    }
+  );
+
+  await e.DB.prepare(`
+    INSERT INTO customer_profiles (
+      customer_id,
+      avatar_storage_key,
+      avatar_content_type,
+      avatar_updated_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ?,
+      ?,
+      ?,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT(customer_id)
+    DO UPDATE SET
+      avatar_storage_key =
+        excluded.avatar_storage_key,
+      avatar_content_type =
+        excluded.avatar_content_type,
+      avatar_updated_at =
+        CURRENT_TIMESTAMP,
+      updated_at =
+        CURRENT_TIMESTAMP
+  `)
+    .bind(
+      currentCustomer.id,
+      storageKey,
+      contentType
+    )
+    .run();
+
+  if (
+    oldProfile?.avatar_storage_key &&
+    oldProfile.avatar_storage_key !==
+      storageKey
+  ) {
+    try {
+      await e.DOCUMENTS.delete(
+        oldProfile.avatar_storage_key
+      );
+    } catch (deleteError) {
+      console.error(
+        'Não foi possível eliminar a fotografia anterior:',
+        deleteError
+      );
+    }
+  }
+
+  return out({
+    success: true,
+
+    avatarUrl:
+      '/api/my/avatar?v=' +
+      Date.now()
+  });
+}
+
+if (
+  p === '/api/my/avatar' &&
+  m === 'DELETE'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const profile =
+    await e.DB.prepare(`
+      SELECT avatar_storage_key
+      FROM customer_profiles
+      WHERE customer_id = ?
+    `)
+      .bind(currentCustomer.id)
+      .first();
+
+  if (
+    profile?.avatar_storage_key
+  ) {
+    try {
+      await e.DOCUMENTS.delete(
+        profile.avatar_storage_key
+      );
+    } catch (deleteError) {
+      console.error(
+        'Não foi possível eliminar a fotografia no R2:',
+        deleteError
+      );
+    }
+  }
+
+  await e.DB.prepare(`
+    INSERT INTO customer_profiles (
+      customer_id,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ?,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT(customer_id)
+    DO UPDATE SET
+      avatar_storage_key = NULL,
+      avatar_content_type = NULL,
+      avatar_updated_at = NULL,
+      updated_at = CURRENT_TIMESTAMP
+  `)
+    .bind(currentCustomer.id)
+    .run();
+
+  return out({
+    success: true,
+    message:
+      'Fotografia removida.'
+  });
+}
+
+/* =========================================================
+   DADOS FISCAIS
+   ========================================================= */
+
+if (
+  p === '/api/my/fiscal-profile' &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const fiscalProfile =
+    await e.DB.prepare(`
+      SELECT
+        customer_type,
+        fiscal_name,
+        tax_number,
+        billing_email,
+        fiscal_country,
+        confirmed_at,
+        updated_at
+      FROM customer_fiscal_profiles
+      WHERE customer_id = ?
+    `)
+      .bind(currentCustomer.id)
+      .first();
+
+  return out({
+    success: true,
+
+    fiscalProfile:
+      fiscalProfile || {
+        customer_type:
+          'individual',
+
+        fiscal_name:
+          currentCustomer.name || '',
+
+        tax_number: '',
+
+        billing_email:
+          currentCustomer.email || '',
+
+        fiscal_country:
+          'PT',
+
+        confirmed_at:
+          null,
+
+        updated_at:
+          null
+      }
+  });
+}
+
+if (
+  p === '/api/my/fiscal-profile' &&
+  m === 'PUT'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const body = await r.json();
+
+  const customerType =
+    cleanCustomerText(
+      body.customerType,
+      30
+    );
+
+  const fiscalName =
+    cleanCustomerText(
+      body.fiscalName,
+      160
+    );
+
+  const taxNumber =
+    String(
+      body.taxNumber || ''
+    ).replace(/\D/g, '');
+
+  const billingEmail =
+    normalizeCustomerEmail(
+      body.billingEmail
+    );
+
+  const fiscalCountry =
+    cleanCustomerText(
+      body.fiscalCountry || 'PT',
+      2
+    ).toUpperCase();
+
+  const allowedCustomerTypes = [
+    'individual',
+    'sole_trader',
+    'organization'
+  ];
+
+  if (
+    !allowedCustomerTypes.includes(
+      customerType
+    )
+  ) {
+    return out(
+      {
+        error:
+          'O tipo de cliente é inválido.'
+      },
+      400
+    );
+  }
+
+  if (fiscalName.length < 2) {
+    return out(
+      {
+        error:
+          'Indica o nome fiscal.'
+      },
+      400
+    );
+  }
+
+  if (
+    fiscalCountry === 'PT' &&
+    !isValidPortugueseTaxNumber(
+      taxNumber
+    )
+  ) {
+    return out(
+      {
+        error:
+          'O NIF português é inválido.'
+      },
+      400
+    );
+  }
+
+  if (
+    !isValidCustomerEmail(
+      billingEmail
+    )
+  ) {
+    return out(
+      {
+        error:
+          'O email de faturação é inválido.'
+      },
+      400
+    );
+  }
+
+  await e.DB.prepare(`
+    INSERT INTO customer_fiscal_profiles (
+      customer_id,
+      customer_type,
+      fiscal_name,
+      tax_number,
+      billing_email,
+      fiscal_country,
+      confirmed_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT(customer_id)
+    DO UPDATE SET
+      customer_type =
+        excluded.customer_type,
+      fiscal_name =
+        excluded.fiscal_name,
+      tax_number =
+        excluded.tax_number,
+      billing_email =
+        excluded.billing_email,
+      fiscal_country =
+        excluded.fiscal_country,
+      confirmed_at =
+        CURRENT_TIMESTAMP,
+      updated_at =
+        CURRENT_TIMESTAMP
+  `)
+    .bind(
+      currentCustomer.id,
+      customerType,
+      fiscalName,
+      taxNumber,
+      billingEmail,
+      fiscalCountry
+    )
+    .run();
+
+  return out({
+    success: true,
+    message:
+      'Dados fiscais guardados.'
+  });
+}
+
+/* =========================================================
+   MORADAS
+   ========================================================= */
+
+const customerAddressMatch =
+  p.match(
+    /^\/api\/my\/addresses\/(billing|shipping)$/
+  );
+
+if (
+  customerAddressMatch &&
+  m === 'GET'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const addressType =
+    customerAddressMatch[1];
+
+  const address =
+    await e.DB.prepare(`
+      SELECT
+        id,
+        address_type,
+        recipient_name,
+        tax_number,
+        phone,
+        address_line_1,
+        address_line_2,
+        postal_code,
+        locality,
+        municipality,
+        district,
+        country,
+        delivery_instructions,
+        updated_at
+      FROM customer_addresses
+      WHERE customer_id = ?
+        AND address_type = ?
+    `)
+      .bind(
+        currentCustomer.id,
+        addressType
+      )
+      .first();
+
+  return out({
+    success: true,
+    address: address || null
+  });
+}
+
+if (
+  customerAddressMatch &&
+  m === 'PUT'
+) {
+  const currentCustomer =
+    await customer(r, e);
+
+  if (!currentCustomer) {
+    return out(
+      {
+        error: 'Inicia sessão.'
+      },
+      401
+    );
+  }
+
+  const addressType =
+    customerAddressMatch[1];
+
+  const body = await r.json();
+
+  const recipientName =
+    cleanCustomerText(
+      body.recipientName,
+      160
+    );
+
+  const taxNumber =
+    String(
+      body.taxNumber || ''
+    ).replace(/\D/g, '');
+
+  const phone =
+    cleanCustomerText(
+      body.phone,
+      30
+    );
+
+  const addressLine1 =
+    cleanCustomerText(
+      body.addressLine1,
+      180
+    );
+
+  const addressLine2 =
+    cleanCustomerText(
+      body.addressLine2,
+      180
+    );
+
+  const postalCode =
+    normalizePortuguesePostalCode(
+      body.postalCode
+    );
+
+  const locality =
+    cleanCustomerText(
+      body.locality,
+      120
+    );
+
+  const municipality =
+    cleanCustomerText(
+      body.municipality,
+      120
+    );
+
+  const district =
+    cleanCustomerText(
+      body.district,
+      120
+    );
+
+  const country =
+    cleanCustomerText(
+      body.country || 'PT',
+      2
+    ).toUpperCase();
+
+  const deliveryInstructions =
+    cleanCustomerText(
+      body.deliveryInstructions,
+      500
+    );
+
+  if (recipientName.length < 2) {
+    return out(
+      {
+        error:
+          'Indica o nome do destinatário.'
+      },
+      400
+    );
+  }
+
+  if (addressLine1.length < 3) {
+    return out(
+      {
+        error:
+          'Indica a morada.'
+      },
+      400
+    );
+  }
+
+  if (!postalCode) {
+    return out(
+      {
+        error:
+          'O código postal deve ter o formato 0000-000.'
+      },
+      400
+    );
+  }
+
+  if (locality.length < 2) {
+    return out(
+      {
+        error:
+          'Indica a localidade.'
+      },
+      400
+    );
+  }
+
+  if (
+    taxNumber &&
+    country === 'PT' &&
+    !isValidPortugueseTaxNumber(
+      taxNumber
+    )
+  ) {
+    return out(
+      {
+        error:
+          'O NIF indicado é inválido.'
+      },
+      400
+    );
+  }
+
+  await e.DB.prepare(`
+    INSERT INTO customer_addresses (
+      customer_id,
+      address_type,
+      recipient_name,
+      tax_number,
+      phone,
+      address_line_1,
+      address_line_2,
+      postal_code,
+      locality,
+      municipality,
+      district,
+      country,
+      delivery_instructions,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      ?,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (
+      customer_id,
+      address_type
+    )
+    DO UPDATE SET
+      recipient_name =
+        excluded.recipient_name,
+      tax_number =
+        excluded.tax_number,
+      phone =
+        excluded.phone,
+      address_line_1 =
+        excluded.address_line_1,
+      address_line_2 =
+        excluded.address_line_2,
+      postal_code =
+        excluded.postal_code,
+      locality =
+        excluded.locality,
+      municipality =
+        excluded.municipality,
+      district =
+        excluded.district,
+      country =
+        excluded.country,
+      delivery_instructions =
+        excluded.delivery_instructions,
+      updated_at =
+        CURRENT_TIMESTAMP
+  `)
+    .bind(
+      currentCustomer.id,
+      addressType,
+      recipientName,
+      taxNumber || null,
+      phone || null,
+      addressLine1,
+      addressLine2 || null,
+      postalCode,
+      locality,
+      municipality || null,
+      district || null,
+      country,
+      deliveryInstructions || null
+    )
+    .run();
+
+  return out({
+    success: true,
+
+    message:
+      addressType === 'billing'
+        ? 'Morada de faturação guardada.'
+        : 'Morada de entrega guardada.'
+  });
+}
+
+/* =========================================================
+   PESQUISA DE CÓDIGO POSTAL
+   ========================================================= */
+
+const postalCodeMatch =
+  p.match(
+    /^\/api\/postal-codes\/(\d{4}-?\d{3})$/
+  );
+
+if (
+  postalCodeMatch &&
+  m === 'GET'
+) {
+  const normalizedPostalCode =
+    normalizePortuguesePostalCode(
+      postalCodeMatch[1]
+    );
+
+  if (!normalizedPostalCode) {
+    return out(
+      {
+        error:
+          'Código postal inválido.'
+      },
+      400
+    );
+  }
+
+  const result =
+    await e.DB.prepare(`
+      SELECT
+        postal_code,
+        locality,
+        municipality,
+        district
+      FROM postal_codes
+      WHERE postal_code = ?
+      ORDER BY locality
+      LIMIT 20
+    `)
+      .bind(
+        normalizedPostalCode
+      )
+      .all();
+
+  return out({
+    success: true,
+
+    postalCode:
+      normalizedPostalCode,
+
+    matches:
+      result.results || []
+  });
+}
+
+/* =========================================================
+   FIM DAS ROTAS
+   ========================================================= */
+
+return null;
+}
+
+export default {
+  async fetch(r, e) {
+    try {
+      return (
+        await route(r, e) ||
+        e.ASSETS.fetch(r)
+      );
+    } catch (error) {
+      console.error(error);
+
+      return out(
+        {
+          success: false,
+
+          error:
+            error.message ||
+            'Erro interno.'
+        },
+        500
+      );
+    }
+  }
+};     
