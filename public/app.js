@@ -664,22 +664,144 @@ if (document.readyState === 'loading') {
 } else {
   resizeLivroReclamacoesIcon();
 }
-
 /* =========================================================
    ÁREA DE CLIENTE
    ========================================================= */
 
-function openCustomerView(viewName, updateHash = true) {
+function customerOrderStatus(order) {
+  if (order.payment_status === 'paid') {
+    return 'Pagamento recebido';
+  }
+
+  if (order.payment_status === 'pending') {
+    return 'A aguardar pagamento';
+  }
+
+  const labels = {
+    pending: 'Pedido recebido',
+    confirmed: 'Confirmada',
+    ready: 'Pronta',
+    completed: 'Concluída',
+    cancelled: 'Cancelada',
+    expired: 'Expirada'
+  };
+
+  return (
+    labels[order.status] ||
+    order.status ||
+    'Em processamento'
+  );
+}
+
+function customerOrderCard(order) {
+  return `
+    <article class="customer-panel-card">
+      <div>
+        <strong>
+          ${escapeHtml(
+            order.order_number ||
+            `Pedido ${order.id}`
+          )}
+        </strong>
+
+        <small>
+          ${formatOrderDate(order.created_at)}
+        </small>
+      </div>
+
+      <div>
+        <strong>
+          ${formatOrderMoney(order.total_cents)}
+        </strong>
+
+        <small>
+          ${escapeHtml(
+            customerOrderStatus(order)
+          )}
+        </small>
+      </div>
+    </article>
+  `;
+}
+
+function customerSubscriptionCard(subscription) {
+  const frequencyLabel =
+    freq[subscription.frequency] ||
+    subscription.frequency ||
+    'Frequência não indicada';
+
+  const statusLabel =
+    substat[subscription.status] ||
+    subscription.status ||
+    'Estado não indicado';
+
+  return `
+    <article class="customer-panel-card">
+      <div>
+        <strong>
+          ${Number(
+            subscription.eggs_per_delivery ||
+            subscription.eggs ||
+            0
+          )} ovos
+        </strong>
+
+        <small>
+          ${escapeHtml(frequencyLabel)}
+        </small>
+      </div>
+
+      <span class="status">
+        ${escapeHtml(statusLabel)}
+      </span>
+    </article>
+  `;
+}
+
+function countCustomerDocuments(orders) {
+  return orders.reduce(
+    (total, order) => {
+      const documents =
+        order.documents || {};
+
+      const hasReceipt =
+        documents.receipt?.status ===
+          'available' ||
+        order.receipt_status === 'issued';
+
+      const hasInvoice =
+        documents.invoice?.status ===
+          'available' ||
+        order.invoice_status ===
+          'available';
+
+      const hasCreditNote =
+        documents.creditNote?.status ===
+          'available' ||
+        order.credit_note_status ===
+          'available';
+
+      return (
+        total +
+        Number(hasReceipt) +
+        Number(hasInvoice) +
+        Number(hasCreditNote)
+      );
+    },
+    0
+  );
+}
+
+function openCustomerView(
+  viewName,
+  updateAddress = true
+) {
   const targetPanel =
     document.querySelector(
       `#view-${viewName}`
     );
 
   if (!targetPanel) {
-    console.warn(
-      `Painel não encontrado: view-${viewName}`
-    );
-
     return;
   }
 
@@ -709,9 +831,7 @@ function openCustomerView(viewName, updateHash = true) {
     });
 
   document
-    .querySelectorAll(
-      '.customer-view'
-    )
+    .querySelectorAll('.customer-view')
     .forEach(panel => {
       panel.classList.toggle(
         'active',
@@ -719,7 +839,7 @@ function openCustomerView(viewName, updateHash = true) {
       );
     });
 
-  if (updateHash) {
+  if (updateAddress) {
     history.pushState(
       {
         customerView: viewName
@@ -730,13 +850,13 @@ function openCustomerView(viewName, updateHash = true) {
   }
 }
 
-function customerViewFromHash() {
+function getCustomerViewFromAddress() {
   const requestedView =
     location.hash
       .replace('#', '')
       .trim();
 
-  const validViews = [
+  const allowedViews = [
     'summary',
     'orders',
     'subscriptions',
@@ -746,149 +866,40 @@ function customerViewFromHash() {
     'security'
   ];
 
-  return validViews.includes(
+  return allowedViews.includes(
     requestedView
   )
     ? requestedView
     : 'summary';
 }
 
-function customerDocumentCount(orders) {
-  return orders.reduce(
-    (total, order) => {
-      const documents =
-        order.documents || {};
+async function loadCustomerAreaData() {
+  const [
+    ordersResponse,
+    subscriptionsResponse,
+    authenticationResponse
+  ] = await Promise.all([
+    api('/api/my/orders'),
+    api('/api/my/subscriptions'),
+    api('/api/auth/me')
+  ]);
 
-      const receiptAvailable =
-        documents.receipt?.status ===
-          'available' ||
-        order.receipt_status ===
-          'issued';
+  const orders =
+    Array.isArray(ordersResponse.orders)
+      ? ordersResponse.orders
+      : [];
 
-      const invoiceAvailable =
-        documents.invoice?.status ===
-          'available' ||
-        order.invoice_status ===
-          'available';
+  const subscriptions =
+    Array.isArray(
+      subscriptionsResponse.subscriptions
+    )
+      ? subscriptionsResponse.subscriptions
+      : [];
 
-      const creditNoteAvailable =
-        documents.creditNote?.status ===
-          'available' ||
-        order.credit_note_status ===
-          'available';
+  const customer =
+    authenticationResponse.customer ||
+    null;
 
-      return total +
-        Number(receiptAvailable) +
-        Number(invoiceAvailable) +
-        Number(creditNoteAvailable);
-    },
-    0
-  );
-}
-
-function customerOrderStatus(order) {
-  if (order.payment_status === 'paid') {
-    return 'Pagamento recebido';
-  }
-
-  if (order.payment_status === 'pending') {
-    return 'A aguardar pagamento';
-  }
-
-  if (order.payment_status === 'refunded') {
-    return 'Pagamento reembolsado';
-  }
-
-  const labels = {
-    pending: 'Pedido recebido',
-    confirmed: 'Confirmada',
-    ready: 'Pronta',
-    completed: 'Concluída',
-    cancelled: 'Cancelada',
-    expired: 'Expirada'
-  };
-
-  return (
-    labels[order.status] ||
-    order.status ||
-    'Em processamento'
-  );
-}
-
-function customerOrderPreview(order) {
-  const safeOrderNumber =
-    escapeHtml(
-      order.order_number ||
-      `Pedido ${order.id}`
-    );
-
-  const safeStatus =
-    escapeHtml(
-      customerOrderStatus(order)
-    );
-
-  return `
-    <article class="customer-panel-card">
-      <div>
-        <strong>
-          ${safeOrderNumber}
-        </strong>
-
-        <small>
-          ${formatOrderDate(order.created_at)}
-        </small>
-      </div>
-
-      <div>
-        <strong>
-          ${formatOrderMoney(order.total_cents)}
-        </strong>
-
-        <small>
-          ${safeStatus}
-        </small>
-      </div>
-    </article>
-  `;
-}
-
-function customerSubscriptionPreview(subscription) {
-  const frequencyLabel =
-    freq[subscription.frequency] ||
-    subscription.frequency ||
-    'Não indicada';
-
-  const statusLabel =
-    substat[subscription.status] ||
-    subscription.status ||
-    'Não indicado';
-
-  return `
-    <article class="customer-panel-card">
-      <div>
-        <strong>
-          ${Number(
-            subscription.eggs_per_delivery ||
-            subscription.eggs ||
-            0
-          )} ovos
-        </strong>
-
-        <small>
-          ${escapeHtml(frequencyLabel)}
-        </small>
-      </div>
-
-      <div>
-        <span class="status">
-          ${escapeHtml(statusLabel)}
-        </span>
-      </div>
-    </article>
-  `;
-}
-
-async function loadCustomerDashboard() {
   const summaryOrders =
     document.querySelector(
       '#summaryOrders'
@@ -909,325 +920,222 @@ async function loadCustomerDashboard() {
       '#customerRecentOrders'
     );
 
-  if (
-    !summaryOrders &&
-    !summarySubscriptions &&
-    !summaryDocuments &&
-    !recentOrders
-  ) {
-    return;
+  if (summaryOrders) {
+    summaryOrders.textContent =
+      String(orders.length);
   }
 
-  try {
-    const [
-      ordersResponse,
-      subscriptionsResponse
-    ] = await Promise.all([
-      api('/api/my/orders'),
-      api('/api/my/subscriptions')
-    ]);
+  if (summarySubscriptions) {
+    summarySubscriptions.textContent =
+      String(subscriptions.length);
+  }
 
-    const orders =
-      Array.isArray(
-        ordersResponse.orders
-      )
-        ? ordersResponse.orders
-        : [];
+  if (summaryDocuments) {
+    summaryDocuments.textContent =
+      String(
+        countCustomerDocuments(orders)
+      );
+  }
 
-    const subscriptions =
-      Array.isArray(
-        subscriptionsResponse.subscriptions
-      )
-        ? subscriptionsResponse.subscriptions
-        : [];
+  if (recentOrders) {
+    recentOrders.innerHTML =
+      orders.length
+        ? orders
+            .slice(0, 3)
+            .map(customerOrderCard)
+            .join('')
+        : `
+            <p>
+              Ainda não existem encomendas.
+            </p>
+          `;
+  }
 
-    if (summaryOrders) {
-      summaryOrders.textContent =
-        String(orders.length);
-    }
+  const ordersPanel =
+    document.querySelector(
+      '#dashboardOrders'
+    );
 
-    if (summarySubscriptions) {
-      summarySubscriptions.textContent =
-        String(subscriptions.length);
-    }
+  if (ordersPanel) {
+    ordersPanel.innerHTML = `
+      <div class="customer-panel-heading">
+        <p>
+          ${orders.length}
+          ${
+            orders.length === 1
+              ? 'encomenda'
+              : 'encomendas'
+          }
+        </p>
 
-    if (summaryDocuments) {
-      summaryDocuments.textContent =
-        String(
-          customerDocumentCount(orders)
-        );
-    }
+        <a
+          class="customer-panel-action"
+          href="/encomendas.html"
+        >
+          Ver tudo
+        </a>
+      </div>
 
-    if (recentOrders) {
-      recentOrders.innerHTML =
+      ${
         orders.length
           ? orders
-              .slice(0, 3)
-              .map(customerOrderPreview)
+              .map(customerOrderCard)
               .join('')
           : `
               <p>
                 Ainda não existem encomendas.
               </p>
-            `;
-    }
-  } catch (error) {
-    console.error(
-      'Erro ao carregar o resumo:',
-      error
-    );
-
-    if (recentOrders) {
-      recentOrders.innerHTML = `
-        <p class="form-message error">
-          Não foi possível carregar o resumo.
-        </p>
-      `;
-    }
+            `
+      }
+    `;
   }
-}
 
-async function loadCustomerPanels() {
-  const ordersTarget =
-    document.querySelector(
-      '#dashboardOrders'
-    );
-
-  const subscriptionsTarget =
+  const subscriptionsPanel =
     document.querySelector(
       '#dashboardSubscriptions'
     );
 
-  const profileTarget =
+  if (subscriptionsPanel) {
+    subscriptionsPanel.innerHTML = `
+      <div class="customer-panel-heading">
+        <p>
+          ${subscriptions.length}
+          ${
+            subscriptions.length === 1
+              ? 'subscrição'
+              : 'subscrições'
+          }
+        </p>
+
+        <a
+          class="customer-panel-action"
+          href="/subscricoes.html"
+        >
+          Ver e gerir
+        </a>
+      </div>
+
+      ${
+        subscriptions.length
+          ? subscriptions
+              .map(
+                customerSubscriptionCard
+              )
+              .join('')
+          : `
+              <p>
+                Ainda não existem subscrições.
+              </p>
+
+              <a
+                class="button solid"
+                href="/produtos.html"
+              >
+                Criar subscrição
+              </a>
+            `
+      }
+    `;
+  }
+
+  const profilePanel =
     document.querySelector(
       '#dashboardProfile'
     );
 
   if (
-    !ordersTarget &&
-    !subscriptionsTarget &&
-    !profileTarget
+    profilePanel &&
+    customer
   ) {
-    return;
-  }
+    profilePanel.innerHTML = `
+      <article class="customer-profile-card">
+        <p>
+          <strong>Nome</strong><br>
+          ${escapeHtml(customer.name || '')}
+        </p>
 
-  try {
-    const [
-      ordersResponse,
-      subscriptionsResponse,
-      authenticationResponse
-    ] = await Promise.all([
-      api('/api/my/orders'),
-      api('/api/my/subscriptions'),
-      api('/api/auth/me')
-    ]);
+        <p>
+          <strong>Nome de utilizador</strong><br>
+          ${escapeHtml(
+            customer.username || ''
+          )}
+        </p>
 
-    const orders =
-      Array.isArray(
-        ordersResponse.orders
-      )
-        ? ordersResponse.orders
-        : [];
+        <p>
+          <strong>Email</strong><br>
+          ${escapeHtml(customer.email || '')}
+        </p>
 
-    const subscriptions =
-      Array.isArray(
-        subscriptionsResponse.subscriptions
-      )
-        ? subscriptionsResponse.subscriptions
-        : [];
-
-    const customer =
-      authenticationResponse.customer ||
-      null;
-
-    if (ordersTarget) {
-      ordersTarget.innerHTML = `
-        <div class="customer-panel-heading">
-          <p>
-            ${orders.length}
-            ${
-              orders.length === 1
-                ? 'encomenda'
-                : 'encomendas'
-            }
-          </p>
-
-          <a
-            class="customer-panel-action"
-            href="/encomendas.html"
-          >
-            Ver tudo
-          </a>
-        </div>
-
-        ${
-          orders.length
-            ? orders
-                .map(customerOrderPreview)
-                .join('')
-            : `
-                <p>
-                  Ainda não existem encomendas.
-                </p>
-              `
-        }
-      `;
-    }
-
-    if (subscriptionsTarget) {
-      subscriptionsTarget.innerHTML = `
-        <div class="customer-panel-heading">
-          <p>
-            ${subscriptions.length}
-            ${
-              subscriptions.length === 1
-                ? 'subscrição'
-                : 'subscrições'
-            }
-          </p>
-
-          <a
-            class="customer-panel-action"
-            href="/subscricoes.html"
-          >
-            Ver e gerir
-          </a>
-        </div>
-
-        ${
-          subscriptions.length
-            ? subscriptions
-                .map(
-                  customerSubscriptionPreview
-                )
-                .join('')
-            : `
-                <p>
-                  Ainda não existem subscrições.
-                </p>
-
-                <a
-                  class="button solid"
-                  href="/produtos.html"
-                >
-                  Criar subscrição
-                </a>
-              `
-        }
-      `;
-    }
-
-    if (
-      profileTarget &&
-      customer
-    ) {
-      profileTarget.innerHTML = `
-        <article class="customer-profile-card">
-          <p>
-            <strong>Nome</strong><br>
-            ${escapeHtml(customer.name || '')}
-          </p>
-
-          <p>
-            <strong>Nome de utilizador</strong><br>
-            ${escapeHtml(
-              customer.username || ''
-            )}
-          </p>
-
-          <p>
-            <strong>Email</strong><br>
-            ${escapeHtml(customer.email || '')}
-          </p>
-
-          <a
-            class="button outline"
-            href="/perfil.html"
-          >
-            Editar perfil
-          </a>
-        </article>
-      `;
-    }
-  } catch (error) {
-    console.error(
-      'Erro ao carregar os painéis:',
-      error
-    );
-
-    [
-      ordersTarget,
-      subscriptionsTarget,
-      profileTarget
-    ]
-      .filter(Boolean)
-      .forEach(target => {
-        target.innerHTML = `
-          <p class="form-message error">
-            Não foi possível carregar esta informação.
-          </p>
-        `;
-      });
+        <a
+          class="button outline"
+          href="/perfil.html"
+        >
+          Editar perfil
+        </a>
+      </article>
+    `;
   }
 }
 
-function initializeCustomerNavigation() {
-  const navigationButtons =
-    document.querySelectorAll(
-      '.customer-nav-button'
+function initializeCustomerArea() {
+  const customerPage =
+    document.querySelector(
+      '.customer-page'
     );
 
-  navigationButtons.forEach(button => {
-    button.addEventListener(
-      'click',
-      () => {
-        openCustomerView(
-          button.dataset.view
-        );
-      }
-    );
-  });
+  if (!customerPage) {
+    return;
+  }
+
+  document
+    .querySelectorAll(
+      '.customer-nav-button'
+    )
+    .forEach(button => {
+      button.addEventListener(
+        'click',
+        () => {
+          openCustomerView(
+            button.dataset.view
+          );
+        }
+      );
+    });
 
   window.addEventListener(
     'popstate',
     () => {
       openCustomerView(
-        customerViewFromHash(),
+        getCustomerViewFromAddress(),
         false
       );
     }
   );
 
   openCustomerView(
-    customerViewFromHash(),
+    getCustomerViewFromAddress(),
     false
   );
-}
 
-async function initializeCustomerArea() {
-  if (
-    !document.querySelector(
-      '.customer-page'
-    )
-  ) {
-    return;
-  }
-
-  initializeCustomerNavigation();
-
-  await Promise.all([
-    loadCustomerDashboard(),
-    loadCustomerPanels()
-  ]);
-}
-
-function startCustomerArea() {
-  initializeCustomerArea()
+  loadCustomerAreaData()
     .catch(error => {
       console.error(
-        'Erro ao iniciar a área de cliente:',
+        'Erro ao carregar a área de cliente:',
         error
       );
+
+      const recentOrders =
+        document.querySelector(
+          '#customerRecentOrders'
+        );
+
+      if (recentOrders) {
+        recentOrders.innerHTML = `
+          <p class="form-message error">
+            Não foi possível carregar a informação.
+          </p>
+        `;
+      }
     });
 }
 
@@ -1236,411 +1144,11 @@ if (
 ) {
   document.addEventListener(
     'DOMContentLoaded',
-    startCustomerArea,
+    initializeCustomerArea,
     {
       once: true
     }
   );
 } else {
-  startCustomerArea();
+  initializeCustomerArea();
 }
-async function loadCustomerDashboard() {
-  const summaryOrders =
-    document.querySelector(
-      '#summaryOrders'
-    );
-
-  const summarySubscriptions =
-    document.querySelector(
-      '#summarySubscriptions'
-    );
-
-  const summaryDocuments =
-    document.querySelector(
-      '#summaryDocuments'
-    );
-
-  const recentOrders =
-    document.querySelector(
-      '#customerRecentOrders'
-    );
-
-  try {
-    const [
-      ordersResponse,
-      subscriptionsResponse
-    ] = await Promise.all([
-      api('/api/my/orders'),
-      api('/api/my/subscriptions')
-    ]);
-
-    const orders =
-      ordersResponse.orders || [];
-
-    const subscriptions =
-      subscriptionsResponse.subscriptions || [];
-
-    const documents =
-      orders.filter(
-        order =>
-          order.documents?.receipt?.status === 'available' ||
-          order.documents?.invoice?.status === 'available'
-      );
-
-    if (summaryOrders) {
-      summaryOrders.textContent =
-        String(orders.length);
-    }
-
-    if (summarySubscriptions) {
-      summarySubscriptions.textContent =
-        String(subscriptions.length);
-    }
-
-    if (summaryDocuments) {
-      summaryDocuments.textContent =
-        String(documents.length);
-    }
-
-    if (
-      recentOrders &&
-      orders.length
-    ) {
-      recentOrders.innerHTML =
-        orders
-          .slice(0, 3)
-          .map(order => `
-            <article class="customer-order-preview">
-              <strong>
-                ${order.order_number}
-              </strong>
-
-              <div>
-                ${(
-                  Number(order.total_cents) / 100
-                ).toFixed(2)} €
-              </div>
-
-              <small>
-                ${
-                  order.payment_status === 'paid'
-                    ? 'Pagamento recebido'
-                    : order.status
-                }
-              </small>
-            </article>
-          `)
-          .join('');
-    } else if (recentOrders) {
-      recentOrders.innerHTML =
-        '<p>Sem encomendas.</p>';
-    }
-  } catch (error) {
-    console.error(error);
-
-    if (recentOrders) {
-      recentOrders.innerHTML =
-        '<p>Não foi possível carregar o resumo.</p>';
-    }
-  }
-}
-
-if (
-  document.querySelector('#summaryOrders') ||
-  document.querySelector('#summarySubscriptions') ||
-  document.querySelector('#summaryDocuments')
-) {
-  loadCustomerDashboard()
-    .catch(console.error);
-}
-async function loadCustomerPanels() {
-
-  const ordersContainer =
-    document.querySelector(
-      '#dashboardOrders'
-    );
-
-  const subscriptionsContainer =
-    document.querySelector(
-      '#dashboardSubscriptions'
-    );
-
-  const profileContainer =
-    document.querySelector(
-      '#dashboardProfile'
-    );
-
-  try {
-
-    const [
-      ordersResponse,
-      subscriptionsResponse,
-      meResponse
-    ] = await Promise.all([
-      api('/api/my/orders'),
-      api('/api/my/subscriptions'),
-      api('/api/auth/me')
-    ]);
-
-    const orders =
-      ordersResponse.orders || [];
-
-    const subscriptions =
-      subscriptionsResponse.subscriptions || [];
-
-    const customer =
-      meResponse.customer || null;
-
-    if (ordersContainer) {
-
-      if (!orders.length) {
-
-        ordersContainer.innerHTML = `
-          <p>
-            Ainda não existem encomendas.
-          </p>
-        `;
-
-      } else {
-
-        ordersContainer.innerHTML =
-          orders
-            .map(order => `
-              <article class="customer-order-preview">
-
-                <strong>
-                  ${order.order_number}
-                </strong>
-
-                <div>
-                  ${(
-                    Number(order.total_cents) / 100
-                  ).toFixed(2)} €
-                </div>
-
-                <small>
-                  ${
-                    order.payment_status === 'paid'
-                      ? 'Pagamento recebido'
-                      : order.status
-                  }
-                </small>
-
-              </article>
-            `)
-            .join('');
-      }
-    }
-
-    if (subscriptionsContainer) {
-
-      if (!subscriptions.length) {
-
-        subscriptionsContainer.innerHTML = `
-          <p>
-            Ainda não existem subscrições.
-          </p>
-        `;
-
-      } else {
-
-        subscriptionsContainer.innerHTML =
-          subscriptions
-            .map(subscription => `
-              <article class="customer-order-preview">
-
-                <strong>
-                  ${subscription.eggs_per_delivery} ovos
-                </strong>
-
-                <div>
-                  ${
-                    freq[
-                      subscription.frequency
-                    ] || subscription.frequency
-                  }
-                </div>
-
-                <small>
-                  ${
-                    substat[
-                      subscription.status
-                    ] || subscription.status
-                  }
-                </small>
-
-              </article>
-            `)
-            .join('');
-      }
-    }
-
-    if (
-      profileContainer &&
-      customer
-    ) {
-
-      profileContainer.innerHTML = `
-        <article class="customer-profile-card">
-
-          <p>
-            <strong>Nome</strong><br>
-            ${customer.name || ''}
-          </p>
-
-          <p>
-            <strong>Nome de utilizador</strong><br>
-            ${customer.username || ''}
-          </p>
-
-          <p>
-            <strong>Email</strong><br>
-            ${customer.email || ''}
-          </p>
-
-        </article>
-      `;
-    }
-
-  } catch (error) {
-
-    console.error(error);
-
-  }
-}
-
-loadCustomerPanels()
-  .catch(console.error);
-async function populateCustomerViews() {
-
-  const ordersTarget =
-    document.querySelector(
-      '#dashboardOrders'
-    );
-
-  const subscriptionsTarget =
-    document.querySelector(
-      '#dashboardSubscriptions'
-    );
-
-  const profileTarget =
-    document.querySelector(
-      '#dashboardProfile'
-    );
-
-  try {
-
-    const [
-      ordersData,
-      subscriptionsData,
-      authData
-    ] = await Promise.all([
-      api('/api/my/orders'),
-      api('/api/my/subscriptions'),
-      api('/api/auth/me')
-    ]);
-
-    const orders =
-      ordersData.orders || [];
-
-    const subscriptions =
-      subscriptionsData.subscriptions || [];
-
-    const customer =
-      authData.customer || null;
-
-    if (ordersTarget) {
-
-      ordersTarget.innerHTML =
-        orders.length
-
-          ? orders.map(order => `
-              <article class="customer-panel-card">
-
-                <strong>
-                  ${order.order_number}
-                </strong>
-
-                <div>
-                  ${(order.total_cents / 100).toFixed(2)} €
-                </div>
-
-                <small>
-                  ${
-                    order.payment_status === 'paid'
-                      ? 'Pagamento recebido'
-                      : order.status
-                  }
-                </small>
-
-              </article>
-            `).join('')
-
-          : '<p>Ainda não existem encomendas.</p>';
-    }
-
-    if (subscriptionsTarget) {
-
-      subscriptionsTarget.innerHTML =
-        subscriptions.length
-
-          ? subscriptions.map(subscription => `
-              <article class="customer-panel-card">
-
-                <strong>
-                  ${subscription.eggs_per_delivery} ovos
-                </strong>
-
-                <div>
-                  ${
-                    freq[
-                      subscription.frequency
-                    ] || subscription.frequency
-                  }
-                </div>
-
-                <small>
-                  ${
-                    substat[
-                      subscription.status
-                    ] || subscription.status
-                  }
-                </small>
-
-              </article>
-            `).join('')
-
-          : '<p>Ainda não existem subscrições.</p>';
-    }
-
-    if (
-      profileTarget &&
-      customer
-    ) {
-
-      profileTarget.innerHTML = `
-        <article class="customer-profile-card">
-
-          <p>
-            <strong>Nome</strong><br>
-            ${customer.name || ''}
-          </p>
-
-          <p>
-            <strong>Nome de utilizador</strong><br>
-            ${customer.username || ''}
-          </p>
-
-          <p>
-            <strong>Email</strong><br>
-            ${customer.email || ''}
-          </p>
-
-          <a
-            class="button outline"
-            href="/perfil.html"
-          >
-            Editar perfil
-          </a>
-
-        </
