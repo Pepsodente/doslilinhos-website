@@ -1268,3 +1268,119 @@ footer{background:#333;color:#fff;border-top:10px solid var(--green)}
 .customer-profile-card p {
   margin: 0 0 12px;
 }
+/* =========================================================
+   PERFIL, FISCAL, MORADAS E SEGURANÇA
+   ========================================================= */
+
+.customer-form {
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px solid #dce2da;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.customer-form + .customer-form {
+  margin-top: 24px;
+}
+
+.customer-form-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(260px,1fr)
+    );
+  gap: 18px;
+}
+
+.customer-form-wide {
+  grid-column: 1 / -1;
+}
+
+.customer-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.customer-form input,
+.customer-form textarea,
+.customer-form select {
+  padding: 12px;
+  border: 1px solid #dce2da;
+  border-radius: 8px;
+}
+
+.customer-form textarea {
+  resize: vertical;
+}
+
+.customer-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.customer-avatar-editor {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.customer-avatar-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 110px;
+  height: 110px;
+  overflow: hidden;
+  border: 2px solid #dce2da;
+  border-radius: 50%;
+  background: #f5f7f5;
+  color: #315f37;
+  font-size: 40px;
+}
+
+.customer-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.customer-danger-zone {
+  margin-top: 24px;
+  padding: 20px;
+  border: 2px solid #f0c8ca;
+  border-radius: 12px;
+  background: #fff5f5;
+}
+
+.customer-danger-zone h3 {
+  margin-top: 0;
+  color: #b42318;
+}
+
+.customer-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.customer-panel-heading h2 {
+  margin: 0;
+}
+
+.status {
+  display: inline-block;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #dff3e5;
+  color: #315f37;
+  font-size: 12px;
+  font-weight: 700;
+}
