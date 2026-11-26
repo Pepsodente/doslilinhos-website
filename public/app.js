@@ -664,42 +664,586 @@ if (document.readyState === 'loading') {
 } else {
   resizeLivroReclamacoesIcon();
 }
-$$('.customer-nav-button')
-  .forEach(button => {
+
+/* =========================================================
+   ÁREA DE CLIENTE
+   ========================================================= */
+
+function openCustomerView(viewName, updateHash = true) {
+  const targetPanel =
+    document.querySelector(
+      `#view-${viewName}`
+    );
+
+  if (!targetPanel) {
+    console.warn(
+      `Painel não encontrado: view-${viewName}`
+    );
+
+    return;
+  }
+
+  document
+    .querySelectorAll(
+      '.customer-nav-button'
+    )
+    .forEach(button => {
+      const selected =
+        button.dataset.view === viewName;
+
+      button.classList.toggle(
+        'active',
+        selected
+      );
+
+      if (selected) {
+        button.setAttribute(
+          'aria-current',
+          'page'
+        );
+      } else {
+        button.removeAttribute(
+          'aria-current'
+        );
+      }
+    });
+
+  document
+    .querySelectorAll(
+      '.customer-view'
+    )
+    .forEach(panel => {
+      panel.classList.toggle(
+        'active',
+        panel === targetPanel
+      );
+    });
+
+  if (updateHash) {
+    history.pushState(
+      {
+        customerView: viewName
+      },
+      '',
+      `#${viewName}`
+    );
+  }
+}
+
+function customerViewFromHash() {
+  const requestedView =
+    location.hash
+      .replace('#', '')
+      .trim();
+
+  const validViews = [
+    'summary',
+    'orders',
+    'subscriptions',
+    'profile',
+    'fiscal',
+    'addresses',
+    'security'
+  ];
+
+  return validViews.includes(
+    requestedView
+  )
+    ? requestedView
+    : 'summary';
+}
+
+function customerDocumentCount(orders) {
+  return orders.reduce(
+    (total, order) => {
+      const documents =
+        order.documents || {};
+
+      const receiptAvailable =
+        documents.receipt?.status ===
+          'available' ||
+        order.receipt_status ===
+          'issued';
+
+      const invoiceAvailable =
+        documents.invoice?.status ===
+          'available' ||
+        order.invoice_status ===
+          'available';
+
+      const creditNoteAvailable =
+        documents.creditNote?.status ===
+          'available' ||
+        order.credit_note_status ===
+          'available';
+
+      return total +
+        Number(receiptAvailable) +
+        Number(invoiceAvailable) +
+        Number(creditNoteAvailable);
+    },
+    0
+  );
+}
+
+function customerOrderStatus(order) {
+  if (order.payment_status === 'paid') {
+    return 'Pagamento recebido';
+  }
+
+  if (order.payment_status === 'pending') {
+    return 'A aguardar pagamento';
+  }
+
+  if (order.payment_status === 'refunded') {
+    return 'Pagamento reembolsado';
+  }
+
+  const labels = {
+    pending: 'Pedido recebido',
+    confirmed: 'Confirmada',
+    ready: 'Pronta',
+    completed: 'Concluída',
+    cancelled: 'Cancelada',
+    expired: 'Expirada'
+  };
+
+  return (
+    labels[order.status] ||
+    order.status ||
+    'Em processamento'
+  );
+}
+
+function customerOrderPreview(order) {
+  const safeOrderNumber =
+    escapeHtml(
+      order.order_number ||
+      `Pedido ${order.id}`
+    );
+
+  const safeStatus =
+    escapeHtml(
+      customerOrderStatus(order)
+    );
+
+  return `
+    <article class="customer-panel-card">
+      <div>
+        <strong>
+          ${safeOrderNumber}
+        </strong>
+
+        <small>
+          ${formatOrderDate(order.created_at)}
+        </small>
+      </div>
+
+      <div>
+        <strong>
+          ${formatOrderMoney(order.total_cents)}
+        </strong>
+
+        <small>
+          ${safeStatus}
+        </small>
+      </div>
+    </article>
+  `;
+}
+
+function customerSubscriptionPreview(subscription) {
+  const frequencyLabel =
+    freq[subscription.frequency] ||
+    subscription.frequency ||
+    'Não indicada';
+
+  const statusLabel =
+    substat[subscription.status] ||
+    subscription.status ||
+    'Não indicado';
+
+  return `
+    <article class="customer-panel-card">
+      <div>
+        <strong>
+          ${Number(
+            subscription.eggs_per_delivery ||
+            subscription.eggs ||
+            0
+          )} ovos
+        </strong>
+
+        <small>
+          ${escapeHtml(frequencyLabel)}
+        </small>
+      </div>
+
+      <div>
+        <span class="status">
+          ${escapeHtml(statusLabel)}
+        </span>
+      </div>
+    </article>
+  `;
+}
+
+async function loadCustomerDashboard() {
+  const summaryOrders =
+    document.querySelector(
+      '#summaryOrders'
+    );
+
+  const summarySubscriptions =
+    document.querySelector(
+      '#summarySubscriptions'
+    );
+
+  const summaryDocuments =
+    document.querySelector(
+      '#summaryDocuments'
+    );
+
+  const recentOrders =
+    document.querySelector(
+      '#customerRecentOrders'
+    );
+
+  if (
+    !summaryOrders &&
+    !summarySubscriptions &&
+    !summaryDocuments &&
+    !recentOrders
+  ) {
+    return;
+  }
+
+  try {
+    const [
+      ordersResponse,
+      subscriptionsResponse
+    ] = await Promise.all([
+      api('/api/my/orders'),
+      api('/api/my/subscriptions')
+    ]);
+
+    const orders =
+      Array.isArray(
+        ordersResponse.orders
+      )
+        ? ordersResponse.orders
+        : [];
+
+    const subscriptions =
+      Array.isArray(
+        subscriptionsResponse.subscriptions
+      )
+        ? subscriptionsResponse.subscriptions
+        : [];
+
+    if (summaryOrders) {
+      summaryOrders.textContent =
+        String(orders.length);
+    }
+
+    if (summarySubscriptions) {
+      summarySubscriptions.textContent =
+        String(subscriptions.length);
+    }
+
+    if (summaryDocuments) {
+      summaryDocuments.textContent =
+        String(
+          customerDocumentCount(orders)
+        );
+    }
+
+    if (recentOrders) {
+      recentOrders.innerHTML =
+        orders.length
+          ? orders
+              .slice(0, 3)
+              .map(customerOrderPreview)
+              .join('')
+          : `
+              <p>
+                Ainda não existem encomendas.
+              </p>
+            `;
+    }
+  } catch (error) {
+    console.error(
+      'Erro ao carregar o resumo:',
+      error
+    );
+
+    if (recentOrders) {
+      recentOrders.innerHTML = `
+        <p class="form-message error">
+          Não foi possível carregar o resumo.
+        </p>
+      `;
+    }
+  }
+}
+
+async function loadCustomerPanels() {
+  const ordersTarget =
+    document.querySelector(
+      '#dashboardOrders'
+    );
+
+  const subscriptionsTarget =
+    document.querySelector(
+      '#dashboardSubscriptions'
+    );
+
+  const profileTarget =
+    document.querySelector(
+      '#dashboardProfile'
+    );
+
+  if (
+    !ordersTarget &&
+    !subscriptionsTarget &&
+    !profileTarget
+  ) {
+    return;
+  }
+
+  try {
+    const [
+      ordersResponse,
+      subscriptionsResponse,
+      authenticationResponse
+    ] = await Promise.all([
+      api('/api/my/orders'),
+      api('/api/my/subscriptions'),
+      api('/api/auth/me')
+    ]);
+
+    const orders =
+      Array.isArray(
+        ordersResponse.orders
+      )
+        ? ordersResponse.orders
+        : [];
+
+    const subscriptions =
+      Array.isArray(
+        subscriptionsResponse.subscriptions
+      )
+        ? subscriptionsResponse.subscriptions
+        : [];
+
+    const customer =
+      authenticationResponse.customer ||
+      null;
+
+    if (ordersTarget) {
+      ordersTarget.innerHTML = `
+        <div class="customer-panel-heading">
+          <p>
+            ${orders.length}
+            ${
+              orders.length === 1
+                ? 'encomenda'
+                : 'encomendas'
+            }
+          </p>
+
+          <a
+            class="customer-panel-action"
+            href="/encomendas.html"
+          >
+            Ver tudo
+          </a>
+        </div>
+
+        ${
+          orders.length
+            ? orders
+                .map(customerOrderPreview)
+                .join('')
+            : `
+                <p>
+                  Ainda não existem encomendas.
+                </p>
+              `
+        }
+      `;
+    }
+
+    if (subscriptionsTarget) {
+      subscriptionsTarget.innerHTML = `
+        <div class="customer-panel-heading">
+          <p>
+            ${subscriptions.length}
+            ${
+              subscriptions.length === 1
+                ? 'subscrição'
+                : 'subscrições'
+            }
+          </p>
+
+          <a
+            class="customer-panel-action"
+            href="/subscricoes.html"
+          >
+            Ver e gerir
+          </a>
+        </div>
+
+        ${
+          subscriptions.length
+            ? subscriptions
+                .map(
+                  customerSubscriptionPreview
+                )
+                .join('')
+            : `
+                <p>
+                  Ainda não existem subscrições.
+                </p>
+
+                <a
+                  class="button solid"
+                  href="/produtos.html"
+                >
+                  Criar subscrição
+                </a>
+              `
+        }
+      `;
+    }
+
+    if (
+      profileTarget &&
+      customer
+    ) {
+      profileTarget.innerHTML = `
+        <article class="customer-profile-card">
+          <p>
+            <strong>Nome</strong><br>
+            ${escapeHtml(customer.name || '')}
+          </p>
+
+          <p>
+            <strong>Nome de utilizador</strong><br>
+            ${escapeHtml(
+              customer.username || ''
+            )}
+          </p>
+
+          <p>
+            <strong>Email</strong><br>
+            ${escapeHtml(customer.email || '')}
+          </p>
+
+          <a
+            class="button outline"
+            href="/perfil.html"
+          >
+            Editar perfil
+          </a>
+        </article>
+      `;
+    }
+  } catch (error) {
+    console.error(
+      'Erro ao carregar os painéis:',
+      error
+    );
+
+    [
+      ordersTarget,
+      subscriptionsTarget,
+      profileTarget
+    ]
+      .filter(Boolean)
+      .forEach(target => {
+        target.innerHTML = `
+          <p class="form-message error">
+            Não foi possível carregar esta informação.
+          </p>
+        `;
+      });
+  }
+}
+
+function initializeCustomerNavigation() {
+  const navigationButtons =
+    document.querySelectorAll(
+      '.customer-nav-button'
+    );
+
+  navigationButtons.forEach(button => {
     button.addEventListener(
       'click',
       () => {
-        const targetView =
-          button.dataset.view;
-
-        $$('.customer-nav-button')
-          .forEach(item =>
-            item.classList.remove(
-              'active'
-            )
-          );
-
-        button.classList.add(
-          'active'
+        openCustomerView(
+          button.dataset.view
         );
-
-        $$('.customer-view')
-          .forEach(panel =>
-            panel.classList.remove(
-              'active'
-            )
-          );
-
-        document
-          .querySelector(
-            `#view-${targetView}`
-          )
-          ?.classList.add(
-            'active'
-          );
       }
     );
   });
+
+  window.addEventListener(
+    'popstate',
+    () => {
+      openCustomerView(
+        customerViewFromHash(),
+        false
+      );
+    }
+  );
+
+  openCustomerView(
+    customerViewFromHash(),
+    false
+  );
+}
+
+async function initializeCustomerArea() {
+  if (
+    !document.querySelector(
+      '.customer-page'
+    )
+  ) {
+    return;
+  }
+
+  initializeCustomerNavigation();
+
+  await Promise.all([
+    loadCustomerDashboard(),
+    loadCustomerPanels()
+  ]);
+}
+
+function startCustomerArea() {
+  initializeCustomerArea()
+    .catch(error => {
+      console.error(
+        'Erro ao iniciar a área de cliente:',
+        error
+      );
+    });
+}
+
+if (
+  document.readyState === 'loading'
+) {
+  document.addEventListener(
+    'DOMContentLoaded',
+    startCustomerArea,
+    {
+      once: true
+    }
+  );
+} else {
+  startCustomerArea();
+}
 async function loadCustomerDashboard() {
   const summaryOrders =
     document.querySelector(
