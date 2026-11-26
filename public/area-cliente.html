@@ -421,45 +421,272 @@
   id="view-profile"
   class="customer-view"
 >
-  <h2>Perfil</h2>
+  <div class="customer-panel-heading">
+    <div>
+      <p class="eyebrow">
+        A minha conta
+      </p>
 
-  <div id="dashboardProfile">
-    A carregar perfil...
+      <h2>Perfil</h2>
+    </div>
   </div>
+
+  <form
+    id="customerProfileForm"
+    class="customer-form"
+  >
+    <section class="customer-avatar-editor">
+      <div
+        id="customerAvatarPreview"
+        class="customer-avatar-preview"
+      >
+        <span aria-hidden="true">
+          ○
+        </span>
+      </div>
+
+      <div>
+        <strong>Fotografia</strong>
+
+        <p>
+          JPEG, PNG ou WebP até 5 MB.
+        </p>
+
+        <div class="customer-form-actions">
+          <label
+            class="button outline"
+            for="customerAvatarInput"
+          >
+            Escolher fotografia
+          </label>
+
+          <input
+            id="customerAvatarInput"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
+          >
+
+          <button
+            id="removeCustomerAvatar"
+            type="button"
+            class="button outline"
+            hidden
+          >
+            Remover
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="customer-form-grid">
+      <label>
+        Nome completo
+
+        <input
+          name="name"
+          type="text"
+          required
+        >
+      </label>
+
+      <label>
+        Nome de utilizador
+
+        <input
+          name="username"
+          type="text"
+          required
+        >
+      </label>
+
+      <label>
+        Email
+
+        <input
+          name="email"
+          type="email"
+          readonly
+        >
+      </label>
+
+      <label>
+        Telefone
+
+        <input
+          name="phone"
+          type="tel"
+          placeholder="+351 900 000 000"
+        >
+      </label>
+    </div>
+
+    <label class="check">
+      <input
+        name="notificationsEnabled"
+        type="checkbox"
+      >
+
+      Receber notificações
+    </label>
+
+    <div class="customer-form-actions">
+      <button
+        class="button solid"
+        type="submit"
+      >
+        Guardar perfil
+      </button>
+    </div>
+
+    <p
+      id="customerProfileMessage"
+      class="form-message"
+    ></p>
+  </form>
 </section>
 
 <section
   id="view-fiscal"
   class="customer-view"
 >
-  <h2>Dados fiscais</h2>
+  <div class="customer-panel-heading">
+    <div>
+      <p class="eyebrow">
+        Faturação
+      </p>
 
-  <p>
-    NIF ainda não configurado.
-  </p>
+      <h2>Dados fiscais</h2>
+    </div>
+  </div>
+
+  <form
+    id="customerFiscalForm"
+    class="customer-form"
+  >
+    <div class="customer-form-grid">
+      <label>
+        Tipo de cliente
+
+        <select
+          name="customerType"
+        >
+          <option value="individual">
+            Particular
+          </option>
+
+          <option value="sole_trader">
+            Empresário em nome individual
+          </option>
+
+          <option value="organization">
+            Empresa
+          </option>
+        </select>
+      </label>
+
+      <label>
+        Nome fiscal
+
+        <input
+          name="fiscalName"
+          type="text"
+        >
+      </label>
+
+      <label>
+        NIF
+
+        <input
+          name="taxNumber"
+          type="text"
+          placeholder="123456789"
+        >
+      </label>
+
+      <label>
+        Email de faturação
+
+        <input
+          name="billingEmail"
+          type="email"
+        >
+      </label>
+    </div>
+
+    <div class="customer-form-actions">
+      <button
+        class="button solid"
+        type="submit"
+      >
+        Guardar dados fiscais
+      </button>
+    </div>
+
+    <p
+      id="customerFiscalMessage"
+      class="form-message"
+    ></p>
+  </form>
 </section>
 
 <section
   id="view-addresses"
   class="customer-view"
 >
-  <h2>Moradas</h2>
+  <div class="customer-panel-heading">
+    <div>
+      <p class="eyebrow">
+        Moradas
+      </p>
 
-  <p>
-    Nenhuma morada configurada.
-  </p>
-</section>
+      <h2>Faturação e entrega</h2>
+    </div>
+  </div>
 
-<section
-  id="view-security"
-  class="customer-view"
->
-  <h2>Segurança</h2>
+  <form
+    id="billingAddressForm"
+    class="customer-form"
+  >
+    <h3>Morada de faturação</h3>
 
-  <p>
-    Alteração de palavra-passe e gestão da conta.
-  </p>
-</section>
+    <div class="customer-form-grid">
+      <label>
+        Nome
+
+        <input
+          name="recipientName"
+          type="text"
+        >
+      </label>
+
+      <label>
+        Código postal
+
+        <input
+          name="postalCode"
+          type="text"
+          placeholder="0000-000"
+        >
+      </label>
+
+      <label>
+        Localidade
+
+        <input
+          name="locality"
+          type="text"
+        >
+      </label>
+
+      <label>
+        Concelho
+
+        <input
+          name="municipality"
+          type="text"
+        >
+ 
     </section>
   </main>
 
